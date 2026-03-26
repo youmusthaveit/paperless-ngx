@@ -8767,7 +8767,7 @@
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">99</context>
         </context-group>
-        <target state="final">Gruppe</target>
+        <target state="final">Gruppieren</target>
       </trans-unit>
       <trans-unit id="2123659921722214537" datatype="html" approved="yes">
         <source>Views</source>
