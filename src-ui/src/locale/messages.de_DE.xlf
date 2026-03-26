@@ -8761,6 +8761,14 @@
         </context-group>
         <target state="final">Sortieren</target>
       </trans-unit>
+      <trans-unit id="8623978917681527907" datatype="html" approved="yes">
+        <source>Group</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">99</context>
+        </context-group>
+        <target state="final">Gruppe</target>
+      </trans-unit>
       <trans-unit id="2123659921722214537" datatype="html" approved="yes">
         <source>Views</source>
         <context-group purpose="location">
