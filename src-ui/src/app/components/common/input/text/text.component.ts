@@ -27,6 +27,9 @@ export class TextComponent extends AbstractInputComponent<string> {
   @Input()
   placeholder: string = ''
 
+  @Input()
+  inputType: string = 'text'
+
   constructor() {
     super()
   }

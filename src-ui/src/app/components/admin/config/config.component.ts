@@ -62,11 +62,13 @@ export class ConfigComponent
   private settingsService = inject(SettingsService)
 
   public readonly ConfigOptionType = ConfigOptionType
+  public readonly ConfigCategory = ConfigCategory
 
   // generated dynamically
   public configForm = new FormGroup({})
 
   public errors = {}
+  public testingStorage = false
 
   get optionCategories(): string[] {
     return Object.values(ConfigCategory)
@@ -215,5 +217,29 @@ export class ConfigComponent
 
   public resetOption(key: string) {
     this.configForm.get(key).setValue(null)
+  }
+
+  public isS3StorageSelected(): boolean {
+    return this.configForm.get('documents_storage_type')?.value === 's3'
+  }
+
+  public testS3Storage() {
+    this.testingStorage = true
+    this.configService
+      .testS3Storage(this.configForm.value as Partial<PaperlessConfig>)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.testingStorage = false
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.testingStorage = false
+          this.toastService.showError(
+            $localize`An error occurred testing S3 storage`,
+            e
+          )
+        },
+      })
   }
 }

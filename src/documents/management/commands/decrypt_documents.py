@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 
 from documents.models import Document
+from documents.storage import document_delete
 from paperless.db import GnuPG
 
 
@@ -59,7 +60,8 @@ class Command(BaseCommand):
         for document in encrypted_files:
             self.stdout.write(f"Decrypting {document}")
 
-            old_paths = [document.source_path, document.thumbnail_path]
+            old_source_name = document.source_name
+            old_thumbnail_name = document.thumbnail_name
 
             with document.source_file as file_handle:
                 raw_document = GnuPG.decrypted(file_handle, passphrase)
@@ -72,22 +74,19 @@ class Command(BaseCommand):
 
             if not ext == ".gpg":
                 raise CommandError(
-                    f"Abort: encrypted file {document.source_path} does not "
+                    f"Abort: encrypted file {document.source_name} does not "
                     f"end with .gpg",
                 )
 
             document.filename = Path(document.filename).stem
 
-            with document.source_path.open("wb") as f:
-                f.write(raw_document)
-
-            with document.thumbnail_path.open("wb") as f:
-                f.write(raw_thumb)
+            document.source_write_bytes(raw_document)
+            document.thumbnail_write_bytes(raw_thumb)
 
             Document.objects.filter(id=document.id).update(
                 storage_type=document.storage_type,
                 filename=document.filename,
             )
 
-            for path in old_paths:
-                path.unlink()
+            document_delete("originals", old_source_name)
+            document_delete("thumbnails", old_thumbnail_name)

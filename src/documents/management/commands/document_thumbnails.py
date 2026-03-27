@@ -1,6 +1,5 @@
 import logging
 import multiprocessing
-import shutil
 
 import tqdm
 from django import db
@@ -10,6 +9,7 @@ from documents.management.commands.mixins import MultiProcessMixin
 from documents.management.commands.mixins import ProgressBarMixin
 from documents.models import Document
 from documents.parsers import get_parser_class_for_mime_type
+from documents.storage import document_write_from_path
 
 
 def _process_document(doc_id):
@@ -23,13 +23,14 @@ def _process_document(doc_id):
         return
 
     try:
-        thumb = parser.get_thumbnail(
-            document.source_path,
-            document.mime_type,
-            document.get_public_filename(),
-        )
+        with document.local_source_path() as source_path:
+            thumb = parser.get_thumbnail(
+                source_path,
+                document.mime_type,
+                document.get_public_filename(),
+            )
 
-        shutil.move(thumb, document.thumbnail_path)
+        document_write_from_path("thumbnails", document.thumbnail_name, thumb)
     finally:
         parser.cleanup()
 

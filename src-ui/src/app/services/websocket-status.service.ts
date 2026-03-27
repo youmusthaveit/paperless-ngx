@@ -209,6 +209,7 @@ export class WebsocketStatusService {
     let statusMessageGet = this.get(messageData.task_id, messageData.filename)
     let status = statusMessageGet.status
     let created = statusMessageGet.created
+    let previousPhase = status.phase
 
     status.updateProgress(
       FileStatusPhase.WORKING,
@@ -224,6 +225,38 @@ export class WebsocketStatusService {
 
     if (messageData.status in FileStatusPhase) {
       status.phase = FileStatusPhase[messageData.status]
+    }
+
+    this.emitPhaseUpdate(status, created, previousPhase)
+  }
+
+  completeTask(taskId: string, documentId?: number) {
+    let { status } = this.get(taskId)
+    let previousPhase = status.phase
+    status.documentId = documentId ?? status.documentId
+    status.message = FILE_STATUS_MESSAGES.finished
+    status.phase = FileStatusPhase.SUCCESS
+    this.emitPhaseUpdate(status, false, previousPhase)
+  }
+
+  failTask(taskId: string, message: string) {
+    let { status } = this.get(taskId)
+    let previousPhase = status.phase
+    status.message = message
+    status.phase = FileStatusPhase.FAILED
+    this.emitPhaseUpdate(status, false, previousPhase)
+  }
+
+  private emitPhaseUpdate(
+    status: FileStatus,
+    created: boolean,
+    previousPhase: FileStatusPhase
+  ) {
+    if (
+      status.phase === previousPhase &&
+      !(created && status.phase === FileStatusPhase.STARTED)
+    ) {
+      return
     }
 
     switch (status.phase) {
@@ -245,9 +278,13 @@ export class WebsocketStatusService {
   }
 
   fail(status: FileStatus, message: string) {
-    status.message = message
-    status.phase = FileStatusPhase.FAILED
-    this.documentConsumptionFailedSubject.next(status)
+    if (status.taskId) {
+      this.failTask(status.taskId, message)
+    } else {
+      status.message = message
+      status.phase = FileStatusPhase.FAILED
+      this.documentConsumptionFailedSubject.next(status)
+    }
   }
 
   disconnect() {

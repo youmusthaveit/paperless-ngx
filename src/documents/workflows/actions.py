@@ -141,10 +141,11 @@ def execute_email_action(
                 friendly_name = (
                     Path(context["current_filename"]).name
                     if context["current_filename"]
-                    else document.source_path.name
+                    else Path(document.source_name).name
                 )
                 attachment = EmailAttachment(
-                    path=document.source_path,
+                    path=None,
+                    content=document.source_read_bytes(),
                     mime_type=document.mime_type,
                     friendly_name=friendly_name,
                 )

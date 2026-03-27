@@ -206,6 +206,11 @@ class ProfileSerializer(PasswordValidationMixin, serializers.ModelSerializer):
 class ApplicationConfigurationSerializer(serializers.ModelSerializer):
     user_args = serializers.JSONField(binary=True, allow_null=True)
     barcode_tag_mapping = serializers.JSONField(binary=True, allow_null=True)
+    documents_s3_secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
 
     def run_validation(self, data):
         # Empty strings treated as None to avoid unexpected behavior
@@ -215,11 +220,32 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
             data["barcode_tag_mapping"] = None
         if "language" in data and data["language"] == "":
             data["language"] = None
+        nullable_string_fields = (
+            "documents_storage_prefix",
+            "documents_s3_bucket",
+            "documents_s3_endpoint_url",
+            "documents_s3_access_key_id",
+            "documents_s3_secret_access_key",
+            "documents_s3_region_name",
+            "documents_s3_default_acl",
+            "documents_s3_custom_domain",
+            "documents_s3_url_protocol",
+            "documents_s3_addressing_style",
+        )
+        for field in nullable_string_fields:
+            if field in data and data[field] == "":
+                data[field] = None
         return super().run_validation(data)
 
     def update(self, instance, validated_data):
         if instance.app_logo and "app_logo" in validated_data:
             instance.app_logo.delete()
+        if (
+            "documents_s3_secret_access_key" in validated_data
+            and validated_data["documents_s3_secret_access_key"]
+            and validated_data["documents_s3_secret_access_key"].replace("*", "") == ""
+        ):
+            validated_data.pop("documents_s3_secret_access_key")
         return super().update(instance, validated_data)
 
     def validate_app_logo(self, file: UploadedFile):

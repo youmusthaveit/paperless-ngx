@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import os
 import tempfile
+from contextlib import ExitStack
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,7 +19,6 @@ from rest_framework.reverse import reverse
 from documents.classifier import load_classifier
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
-from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_filename
 from documents.file_handling import generate_unique_filename
 from documents.loggers import LoggingMixin
@@ -44,8 +44,8 @@ from documents.plugins.helpers import ProgressStatusOptions
 from documents.signals import document_consumption_finished
 from documents.signals import document_consumption_started
 from documents.signals.handlers import run_workflows
+from documents.storage import document_write_from_path
 from documents.templating.workflows import parse_w_workflow_placeholders
-from documents.utils import copy_basic_file_stats
 from documents.utils import copy_file_with_basic_stats
 from documents.utils import run_subprocess
 from paperless_mail.parsers import MailDocumentParser
@@ -229,13 +229,6 @@ class ConsumerPlugin(
         script_env["DOCUMENT_MODIFIED"] = str(document.modified)
         script_env["DOCUMENT_ADDED"] = str(document.added)
         script_env["DOCUMENT_FILE_NAME"] = document.get_public_filename()
-        script_env["DOCUMENT_SOURCE_PATH"] = os.path.normpath(document.source_path)
-        script_env["DOCUMENT_ARCHIVE_PATH"] = os.path.normpath(
-            str(document.archive_path),
-        )
-        script_env["DOCUMENT_THUMBNAIL_PATH"] = os.path.normpath(
-            document.thumbnail_path,
-        )
         script_env["DOCUMENT_DOWNLOAD_URL"] = reverse(
             "document-download",
             kwargs={"pk": document.pk},
@@ -255,21 +248,42 @@ class ConsumerPlugin(
         script_env["TASK_ID"] = self.task_id or ""
 
         try:
-            run_subprocess(
-                [
-                    settings.POST_CONSUME_SCRIPT,
-                    str(document.pk),
-                    document.get_public_filename(),
-                    os.path.normpath(document.source_path),
-                    os.path.normpath(document.thumbnail_path),
-                    reverse("document-download", kwargs={"pk": document.pk}),
-                    reverse("document-thumb", kwargs={"pk": document.pk}),
-                    str(document.correspondent),
-                    str(",".join(document.tags.all().values_list("name", flat=True))),
-                ],
-                script_env,
-                self.log,
-            )
+            with ExitStack() as stack:
+                source_path = stack.enter_context(document.local_source_path())
+                thumbnail_path = stack.enter_context(document.local_thumbnail_path())
+                archive_path = (
+                    stack.enter_context(document.local_archive_path())
+                    if document.has_archive_version
+                    else ""
+                )
+
+                script_env["DOCUMENT_SOURCE_PATH"] = os.path.normpath(str(source_path))
+                script_env["DOCUMENT_ARCHIVE_PATH"] = os.path.normpath(
+                    str(archive_path),
+                )
+                script_env["DOCUMENT_THUMBNAIL_PATH"] = os.path.normpath(
+                    str(thumbnail_path),
+                )
+
+                run_subprocess(
+                    [
+                        settings.POST_CONSUME_SCRIPT,
+                        str(document.pk),
+                        document.get_public_filename(),
+                        os.path.normpath(str(source_path)),
+                        os.path.normpath(str(thumbnail_path)),
+                        reverse("document-download", kwargs={"pk": document.pk}),
+                        reverse("document-thumb", kwargs={"pk": document.pk}),
+                        str(document.correspondent),
+                        str(
+                            ",".join(
+                                document.tags.all().values_list("name", flat=True),
+                            ),
+                        ),
+                    ],
+                    script_env,
+                    self.log,
+                )
 
         except Exception as e:
             self._fail(
@@ -507,20 +521,19 @@ class ConsumerPlugin(
                             use_format=False,
                         )
                     document.filename = generated_filename
-                    create_source_path_directory(document.source_path)
 
-                    self._write(
-                        document.storage_type,
+                    document_write_from_path(
+                        "originals",
+                        str(document.filename),
                         self.unmodified_original
                         if self.unmodified_original is not None
                         else self.working_copy,
-                        document.source_path,
                     )
 
-                    self._write(
-                        document.storage_type,
+                    document_write_from_path(
+                        "thumbnails",
+                        document.thumbnail_name,
                         thumbnail,
-                        document.thumbnail_path,
                     )
 
                     if archive_path and Path(archive_path).is_file():
@@ -541,11 +554,10 @@ class ConsumerPlugin(
                                 use_format=False,
                             )
                         document.archive_filename = generated_archive_filename
-                        create_source_path_directory(document.archive_path)
-                        self._write(
-                            document.storage_type,
+                        document_write_from_path(
+                            "archive",
+                            str(document.archive_filename),
                             archive_path,
-                            document.archive_path,
                         )
 
                         with Path(archive_path).open("rb") as f:
@@ -761,19 +773,6 @@ class ConsumerPlugin(
                     value_field_name: self.metadata.custom_fields.get(field.id, None),
                 }
                 CustomFieldInstance.objects.create(**args)  # adds to document
-
-    def _write(self, storage_type, source, target):
-        with (
-            Path(source).open("rb") as read_file,
-            Path(target).open("wb") as write_file,
-        ):
-            write_file.write(read_file.read())
-
-        # Attempt to copy file's original stats, but it's ok if we can't
-        try:
-            copy_basic_file_stats(source, target)
-        except Exception:  # pragma: no cover
-            pass
 
 
 class ConsumerPreflightPlugin(

@@ -75,33 +75,34 @@ class BulkArchiveStrategy:
 
 class OriginalsOnlyStrategy(BulkArchiveStrategy):
     def add_document(self, doc: Document) -> None:
-        self.zipf.write(doc.source_path, self.make_unique_filename(doc))
+        with doc.local_source_path() as source_path:
+            self.zipf.write(source_path, self.make_unique_filename(doc))
 
 
 class ArchiveOnlyStrategy(BulkArchiveStrategy):
     def add_document(self, doc: Document) -> None:
         if doc.has_archive_version:
-            if TYPE_CHECKING:
-                assert doc.archive_path is not None
-            self.zipf.write(
-                doc.archive_path,
-                self.make_unique_filename(doc, archive=True),
-            )
+            with doc.local_archive_path() as archive_path:
+                self.zipf.write(
+                    archive_path,
+                    self.make_unique_filename(doc, archive=True),
+                )
         else:
-            self.zipf.write(doc.source_path, self.make_unique_filename(doc))
+            with doc.local_source_path() as source_path:
+                self.zipf.write(source_path, self.make_unique_filename(doc))
 
 
 class OriginalAndArchiveStrategy(BulkArchiveStrategy):
     def add_document(self, doc: Document) -> None:
         if doc.has_archive_version:
-            if TYPE_CHECKING:
-                assert doc.archive_path is not None
-            self.zipf.write(
-                doc.archive_path,
-                self.make_unique_filename(doc, archive=True, folder="archive/"),
-            )
+            with doc.local_archive_path() as archive_path:
+                self.zipf.write(
+                    archive_path,
+                    self.make_unique_filename(doc, archive=True, folder="archive/"),
+                )
 
-        self.zipf.write(
-            doc.source_path,
-            self.make_unique_filename(doc, folder="originals/"),
-        )
+        with doc.local_source_path() as source_path:
+            self.zipf.write(
+                source_path,
+                self.make_unique_filename(doc, folder="originals/"),
+            )

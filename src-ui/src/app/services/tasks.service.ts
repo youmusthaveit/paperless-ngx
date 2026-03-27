@@ -67,6 +67,14 @@ export class TasksService {
       })
   }
 
+  public getByTaskId(taskId: string): Observable<PaperlessTask[]> {
+    return this.http
+      .get<
+        PaperlessTask[]
+      >(`${this.baseUrl}${this.endpoint}/?task_id=${encodeURIComponent(taskId)}`)
+      .pipe(first(), takeUntil(this.unsubscribeNotifer))
+  }
+
   public dismissTasks(task_ids: Set<number>) {
     return this.http
       .post(`${this.baseUrl}tasks/acknowledge/`, {

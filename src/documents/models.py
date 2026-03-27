@@ -1,4 +1,6 @@
 import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Final
 
@@ -26,6 +28,15 @@ from django_softdelete.models import SoftDeleteModel
 
 from documents.data_models import DocumentSource
 from documents.parsers import get_default_file_extension
+from documents.storage import document_delete
+from documents.storage import document_exists
+from documents.storage import document_modified_time
+from documents.storage import document_open
+from documents.storage import document_read_bytes
+from documents.storage import document_size
+from documents.storage import document_storage_path
+from documents.storage import document_write_bytes
+from documents.storage import local_document_path
 
 
 class ModelWithOwner(models.Model):
@@ -354,18 +365,45 @@ class Document(SoftDeleteModel, ModelWithOwner):
 
     @property
     def source_path(self) -> Path:
-        if self.filename:
-            fname = str(self.filename)
-        else:
-            fname = f"{self.pk:07}{self.file_type}"
-            if self.storage_type == self.STORAGE_TYPE_GPG:
-                fname += ".gpg"  # pragma: no cover
+        return document_storage_path("originals", self.source_name)
 
-        return (settings.ORIGINALS_DIR / Path(fname)).resolve()
+    @property
+    def source_name(self) -> str:
+        if self.filename:
+            return str(self.filename)
+
+        fname = f"{self.pk:07}{self.file_type}"
+        if self.storage_type == self.STORAGE_TYPE_GPG:
+            fname += ".gpg"  # pragma: no cover
+        return fname
 
     @property
     def source_file(self):
-        return Path(self.source_path).open("rb")
+        return document_open("originals", self.source_name, "rb")
+
+    def source_exists(self) -> bool:
+        return document_exists("originals", self.source_name)
+
+    def source_size(self) -> int | None:
+        return document_size("originals", self.source_name)
+
+    def source_read_bytes(self) -> bytes:
+        return document_read_bytes("originals", self.source_name)
+
+    def source_write_bytes(self, content: bytes) -> None:
+        document_write_bytes("originals", self.source_name, content)
+
+    def delete_source(self) -> None:
+        document_delete("originals", self.source_name)
+
+    @contextmanager
+    def local_source_path(self, *, writeback: bool = False) -> Iterator[Path]:
+        with local_document_path(
+            "originals",
+            self.source_name,
+            writeback=writeback,
+        ) as path:
+            yield path
 
     @property
     def has_archive_version(self) -> bool:
@@ -374,13 +412,47 @@ class Document(SoftDeleteModel, ModelWithOwner):
     @property
     def archive_path(self) -> Path | None:
         if self.has_archive_version:
-            return (settings.ARCHIVE_DIR / Path(str(self.archive_filename))).resolve()
+            return document_storage_path("archive", self.archive_name)
         else:
             return None
 
     @property
+    def archive_name(self) -> str | None:
+        return str(self.archive_filename) if self.archive_filename is not None else None
+
+    @property
     def archive_file(self):
-        return Path(self.archive_path).open("rb")
+        if self.archive_name is None:
+            raise FileNotFoundError("Document does not have an archive version")
+        return document_open("archive", self.archive_name, "rb")
+
+    def archive_exists(self) -> bool:
+        return self.archive_name is not None and document_exists(
+            "archive",
+            self.archive_name,
+        )
+
+    def archive_size(self) -> int | None:
+        return document_size("archive", self.archive_name)
+
+    def archive_read_bytes(self) -> bytes:
+        if self.archive_name is None:
+            raise FileNotFoundError("Document does not have an archive version")
+        return document_read_bytes("archive", self.archive_name)
+
+    def delete_archive(self) -> None:
+        document_delete("archive", self.archive_name)
+
+    @contextmanager
+    def local_archive_path(self, *, writeback: bool = False) -> Iterator[Path]:
+        if self.archive_name is None:
+            raise FileNotFoundError("Document does not have an archive version")
+        with local_document_path(
+            "archive",
+            self.archive_name,
+            writeback=writeback,
+        ) as path:
+            yield path
 
     def get_public_filename(self, *, archive=False, counter=0, suffix=None) -> str:
         """
@@ -407,17 +479,45 @@ class Document(SoftDeleteModel, ModelWithOwner):
 
     @property
     def thumbnail_path(self) -> Path:
+        return document_storage_path("thumbnails", self.thumbnail_name)
+
+    @property
+    def thumbnail_name(self) -> str:
         webp_file_name = f"{self.pk:07}.webp"
         if self.storage_type == self.STORAGE_TYPE_GPG:
             webp_file_name += ".gpg"
-
-        webp_file_path = settings.THUMBNAIL_DIR / Path(webp_file_name)
-
-        return webp_file_path.resolve()
+        return webp_file_name
 
     @property
     def thumbnail_file(self):
-        return Path(self.thumbnail_path).open("rb")
+        return document_open("thumbnails", self.thumbnail_name, "rb")
+
+    def thumbnail_exists(self) -> bool:
+        return document_exists("thumbnails", self.thumbnail_name)
+
+    def thumbnail_size(self) -> int | None:
+        return document_size("thumbnails", self.thumbnail_name)
+
+    def thumbnail_modified_time(self):
+        return document_modified_time("thumbnails", self.thumbnail_name)
+
+    def thumbnail_read_bytes(self) -> bytes:
+        return document_read_bytes("thumbnails", self.thumbnail_name)
+
+    def thumbnail_write_bytes(self, content: bytes) -> None:
+        document_write_bytes("thumbnails", self.thumbnail_name, content)
+
+    def delete_thumbnail(self) -> None:
+        document_delete("thumbnails", self.thumbnail_name)
+
+    @contextmanager
+    def local_thumbnail_path(self, *, writeback: bool = False) -> Iterator[Path]:
+        with local_document_path(
+            "thumbnails",
+            self.thumbnail_name,
+            writeback=writeback,
+        ) as path:
+            yield path
 
     @property
     def created_date(self):

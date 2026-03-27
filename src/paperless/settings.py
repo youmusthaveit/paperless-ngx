@@ -113,6 +113,13 @@ def __get_list(
         return []
 
 
+def __get_string(key: str, default: str | None = None) -> str | None:
+    """
+    Return a string value based on the environment variable or a default.
+    """
+    return os.getenv(key, default)
+
+
 def _parse_redis_url(env_redis: str | None) -> tuple[str, str]:
     """
     Gets the Redis information from the environment or a default and handles
@@ -268,6 +275,34 @@ MEDIA_ROOT = __get_path("PAPERLESS_MEDIA_ROOT", BASE_DIR.parent / "media")
 ORIGINALS_DIR = MEDIA_ROOT / "documents" / "originals"
 ARCHIVE_DIR = MEDIA_ROOT / "documents" / "archive"
 THUMBNAIL_DIR = MEDIA_ROOT / "documents" / "thumbnails"
+
+DOCUMENTS_STORAGE_TYPE = (
+    __get_string("PAPERLESS_DOCUMENTS_STORAGE_TYPE", "local") or "local"
+).lower()
+DOCUMENTS_STORAGE_PREFIX = (
+    __get_string("PAPERLESS_DOCUMENTS_STORAGE_PREFIX", "documents") or "documents"
+).strip("/")
+DOCUMENTS_S3_BUCKET = __get_string("PAPERLESS_DOCUMENTS_S3_BUCKET")
+DOCUMENTS_S3_ENDPOINT_URL = __get_string("PAPERLESS_DOCUMENTS_S3_ENDPOINT_URL")
+DOCUMENTS_S3_ACCESS_KEY_ID = __get_string("PAPERLESS_DOCUMENTS_S3_ACCESS_KEY_ID")
+DOCUMENTS_S3_SECRET_ACCESS_KEY = __get_string(
+    "PAPERLESS_DOCUMENTS_S3_SECRET_ACCESS_KEY",
+)
+DOCUMENTS_S3_REGION_NAME = __get_string("PAPERLESS_DOCUMENTS_S3_REGION_NAME")
+DOCUMENTS_S3_DEFAULT_ACL = __get_string("PAPERLESS_DOCUMENTS_S3_DEFAULT_ACL")
+DOCUMENTS_S3_CUSTOM_DOMAIN = __get_string("PAPERLESS_DOCUMENTS_S3_CUSTOM_DOMAIN")
+DOCUMENTS_S3_URL_PROTOCOL = __get_string(
+    "PAPERLESS_DOCUMENTS_S3_URL_PROTOCOL",
+    "https:",
+)
+DOCUMENTS_S3_ADDRESSING_STYLE = __get_string(
+    "PAPERLESS_DOCUMENTS_S3_ADDRESSING_STYLE",
+)
+DOCUMENTS_S3_QUERYSTRING_AUTH = __get_boolean(
+    "PAPERLESS_DOCUMENTS_S3_QUERYSTRING_AUTH",
+    "false",
+)
+DOCUMENTS_S3_USE_SSL = __get_boolean("PAPERLESS_DOCUMENTS_S3_USE_SSL", "true")
 
 DATA_DIR = __get_path("PAPERLESS_DATA_DIR", BASE_DIR.parent / "data")
 
@@ -428,11 +463,50 @@ if machine().lower() == "aarch64":  # pragma: no cover
 else:
     _static_backend = "whitenoise.storage.CompressedStaticFilesStorage"
 
+
+def _build_document_storage(location: Path, prefix: str) -> dict[str, object]:
+    if DOCUMENTS_STORAGE_TYPE == "s3":
+        options: dict[str, object] = {
+            "bucket_name": DOCUMENTS_S3_BUCKET,
+            "location": "/".join(
+                part for part in [DOCUMENTS_STORAGE_PREFIX, prefix] if part
+            ),
+            "default_acl": DOCUMENTS_S3_DEFAULT_ACL,
+            "querystring_auth": DOCUMENTS_S3_QUERYSTRING_AUTH,
+            "use_ssl": DOCUMENTS_S3_USE_SSL,
+            "file_overwrite": True,
+        }
+        optional_options = {
+            "endpoint_url": DOCUMENTS_S3_ENDPOINT_URL,
+            "access_key": DOCUMENTS_S3_ACCESS_KEY_ID,
+            "secret_key": DOCUMENTS_S3_SECRET_ACCESS_KEY,
+            "region_name": DOCUMENTS_S3_REGION_NAME,
+            "custom_domain": DOCUMENTS_S3_CUSTOM_DOMAIN,
+            "url_protocol": DOCUMENTS_S3_URL_PROTOCOL,
+        }
+        options.update({key: value for key, value in optional_options.items() if value})
+        if DOCUMENTS_S3_ADDRESSING_STYLE:
+            options["addressing_style"] = DOCUMENTS_S3_ADDRESSING_STYLE
+
+        return {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": options,
+        }
+
+    return {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": str(location)},
+    }
+
+
 STORAGES = {
     "staticfiles": {
         "BACKEND": _static_backend,
     },
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "documents_originals": _build_document_storage(ORIGINALS_DIR, "originals"),
+    "documents_archive": _build_document_storage(ARCHIVE_DIR, "archive"),
+    "documents_thumbnails": _build_document_storage(THUMBNAIL_DIR, "thumbnails"),
 }
 
 _CELERY_REDIS_URL, _CHANNELS_REDIS_URL = _parse_redis_url(

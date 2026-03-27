@@ -12,6 +12,7 @@ from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models.functions import Lower
 from django.http import FileResponse
 from django.http import HttpResponseBadRequest
@@ -37,6 +38,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from documents.index import DelayedQuery
 from documents.permissions import PaperlessObjectPermissions
+from documents.storage import test_document_storage_connection
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
@@ -398,6 +400,35 @@ class ApplicationConfigurationViewSet(ModelViewSet):
     @extend_schema(exclude=True)
     def create(self, request, *args, **kwargs):
         return Response(status=405)  # Not Allowed
+
+    @action(detail=True, methods=["post"], url_path="test-s3-storage")
+    def test_s3_storage(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = self.get_serializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        overrides = {
+            key: value
+            for key, value in serializer.validated_data.items()
+            if key.startswith("documents_")
+        }
+
+        secret = overrides.get("documents_s3_secret_access_key")
+        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
+            overrides["documents_s3_secret_access_key"] = (
+                config.documents_s3_secret_access_key
+            )
+
+        try:
+            test_document_storage_connection(overrides)
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 storage test succeeded."})
 
 
 @extend_schema_view(

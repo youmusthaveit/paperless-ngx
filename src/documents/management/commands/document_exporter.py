@@ -498,29 +498,28 @@ class Command(CryptMixin, BaseCommand):
 
             if archive_target:
                 archive_target.parent.mkdir(parents=True, exist_ok=True)
-                if TYPE_CHECKING:
-                    assert isinstance(document.archive_path, Path)
-                with document.archive_path as out_file:
+                with document.archive_file as out_file:
                     archive_target.write_bytes(GnuPG.decrypted(out_file))
                     os.utime(archive_target, times=(t, t))
         else:
-            self.check_and_copy(
-                document.source_path,
-                document.checksum,
-                original_target,
-            )
+            with document.local_source_path() as source_path:
+                self.check_and_copy(
+                    source_path,
+                    document.checksum,
+                    original_target,
+                )
 
             if thumbnail_target:
-                self.check_and_copy(document.thumbnail_path, None, thumbnail_target)
+                with document.local_thumbnail_path() as thumbnail_path:
+                    self.check_and_copy(thumbnail_path, None, thumbnail_target)
 
             if archive_target:
-                if TYPE_CHECKING:
-                    assert isinstance(document.archive_path, Path)
-                self.check_and_copy(
-                    document.archive_path,
-                    document.archive_checksum,
-                    archive_target,
-                )
+                with document.local_archive_path() as archive_path:
+                    self.check_and_copy(
+                        archive_path,
+                        document.archive_checksum,
+                        archive_target,
+                    )
 
     def check_and_write_json(
         self,

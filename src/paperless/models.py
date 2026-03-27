@@ -74,6 +74,11 @@ class ColorConvertChoices(models.TextChoices):
     CMYK = ("CMYK", _("CMYK"))
 
 
+class DocumentStorageTypeChoices(models.TextChoices):
+    LOCAL = ("local", _("local"))
+    S3 = ("s3", _("s3"))
+
+
 class ApplicationConfiguration(AbstractSingletonModel):
     """
     Settings which are common across more than 1 parser
@@ -186,6 +191,94 @@ class ApplicationConfiguration(AbstractSingletonModel):
             FileExtensionValidator(allowed_extensions=["jpg", "png", "gif", "svg"]),
         ],
         upload_to="logo/",
+    )
+
+    documents_storage_type = models.CharField(
+        verbose_name=_("Sets the document storage backend"),
+        null=True,
+        blank=True,
+        max_length=16,
+        choices=DocumentStorageTypeChoices.choices,
+    )
+
+    documents_storage_prefix = models.CharField(
+        verbose_name=_("Sets the document storage prefix"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_bucket = models.CharField(
+        verbose_name=_("Sets the S3 bucket for documents"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_endpoint_url = models.CharField(
+        verbose_name=_("Sets the S3 endpoint URL"),
+        null=True,
+        blank=True,
+        max_length=512,
+    )
+
+    documents_s3_access_key_id = models.CharField(
+        verbose_name=_("Sets the S3 access key ID"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_secret_access_key = models.CharField(
+        verbose_name=_("Sets the S3 secret access key"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_region_name = models.CharField(
+        verbose_name=_("Sets the S3 region"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_default_acl = models.CharField(
+        verbose_name=_("Sets the S3 default ACL"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_custom_domain = models.CharField(
+        verbose_name=_("Sets the S3 custom domain"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_url_protocol = models.CharField(
+        verbose_name=_("Sets the S3 URL protocol"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_s3_addressing_style = models.CharField(
+        verbose_name=_("Sets the S3 addressing style"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_s3_querystring_auth = models.BooleanField(
+        verbose_name=_("Sets whether S3 querystring auth is enabled"),
+        null=True,
+    )
+
+    documents_s3_use_ssl = models.BooleanField(
+        verbose_name=_("Sets whether S3 uses SSL"),
+        null=True,
     )
 
     """

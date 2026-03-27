@@ -1,7 +1,6 @@
 import datetime
 import hashlib
 import logging
-import shutil
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,7 +30,6 @@ from documents.consumer import WorkflowTriggerPlugin
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.double_sided import CollatePlugin
-from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_unique_filename
 from documents.matching import prefilter_documents_by_workflowtrigger
 from documents.models import Correspondent
@@ -53,6 +51,7 @@ from documents.sanity_checker import SanityCheckFailedException
 from documents.signals import document_updated
 from documents.signals.handlers import cleanup_document_deletion
 from documents.signals.handlers import run_workflows
+from documents.storage import document_write_from_path
 from documents.workflows.utils import get_workflows_for_trigger
 
 if settings.AUDIT_LOG_ENABLED:
@@ -265,13 +264,14 @@ def update_document_content_maybe_archive_file(document_id):
     parser: DocumentParser = parser_class(logging_group=uuid.uuid4())
 
     try:
-        parser.parse(document.source_path, mime_type, document.get_public_filename())
+        with document.local_source_path() as source_path:
+            parser.parse(source_path, mime_type, document.get_public_filename())
 
-        thumbnail = parser.get_thumbnail(
-            document.source_path,
-            mime_type,
-            document.get_public_filename(),
-        )
+            thumbnail = parser.get_thumbnail(
+                source_path,
+                mime_type,
+                document.get_public_filename(),
+            )
 
         with transaction.atomic():
             oldDocument = Document.objects.get(pk=document.pk)
@@ -330,9 +330,16 @@ def update_document_content_maybe_archive_file(document_id):
 
             with FileLock(settings.MEDIA_LOCK):
                 if parser.get_archive_path():
-                    create_source_path_directory(document.archive_path)
-                    shutil.move(parser.get_archive_path(), document.archive_path)
-                shutil.move(thumbnail, document.thumbnail_path)
+                    document_write_from_path(
+                        "archive",
+                        str(document.archive_filename),
+                        Path(parser.get_archive_path()),
+                    )
+                document_write_from_path(
+                    "thumbnails",
+                    document.thumbnail_name,
+                    Path(thumbnail),
+                )
 
         document.refresh_from_db()
         logger.info(

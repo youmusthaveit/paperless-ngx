@@ -94,27 +94,32 @@ def check_sanity(*, progress=False, scheduled=True) -> SanityCheckMessages:
 
     for doc in tqdm(Document.global_objects.all(), disable=not progress):
         # Check sanity of the thumbnail
-        thumbnail_path: Final[Path] = Path(doc.thumbnail_path).resolve()
-        if not thumbnail_path.exists() or not thumbnail_path.is_file():
+        if not doc.thumbnail_exists():
             messages.error(doc.pk, "Thumbnail of document does not exist.")
         else:
-            if thumbnail_path in present_files:
-                present_files.remove(thumbnail_path)
+            if settings.DOCUMENTS_STORAGE_TYPE == "local":
+                thumbnail_path: Final[Path] = Path(doc.thumbnail_path).resolve()
+                if thumbnail_path in present_files:
+                    present_files.remove(thumbnail_path)
             try:
-                _ = thumbnail_path.read_bytes()
+                _ = doc.thumbnail_read_bytes()
             except OSError as e:
                 messages.error(doc.pk, f"Cannot read thumbnail file of document: {e}")
 
         # Check sanity of the original file
         # TODO: extract method
-        source_path: Final[Path] = Path(doc.source_path).resolve()
-        if not source_path.exists() or not source_path.is_file():
+        if not doc.source_exists():
             messages.error(doc.pk, "Original of document does not exist.")
         else:
-            if source_path in present_files:
-                present_files.remove(source_path)
+            if settings.DOCUMENTS_STORAGE_TYPE == "local":
+                source_path: Final[Path] = Path(doc.source_path).resolve()
+                if source_path in present_files:
+                    present_files.remove(source_path)
             try:
-                checksum = hashlib.md5(source_path.read_bytes()).hexdigest()
+                checksum = hashlib.md5(
+                    doc.source_read_bytes(),
+                    usedforsecurity=False,
+                ).hexdigest()
             except OSError as e:
                 messages.error(doc.pk, f"Cannot read original file of document: {e}")
             else:
@@ -137,14 +142,18 @@ def check_sanity(*, progress=False, scheduled=True) -> SanityCheckMessages:
                 "Document has an archive file, but its checksum is missing.",
             )
         elif doc.has_archive_version:
-            archive_path: Final[Path] = Path(doc.archive_path).resolve()
-            if not archive_path.exists() or not archive_path.is_file():
+            if not doc.archive_exists():
                 messages.error(doc.pk, "Archived version of document does not exist.")
             else:
-                if archive_path in present_files:
-                    present_files.remove(archive_path)
+                if settings.DOCUMENTS_STORAGE_TYPE == "local":
+                    archive_path: Final[Path] = Path(doc.archive_path).resolve()
+                    if archive_path in present_files:
+                        present_files.remove(archive_path)
                 try:
-                    checksum = hashlib.md5(archive_path.read_bytes()).hexdigest()
+                    checksum = hashlib.md5(
+                        doc.archive_read_bytes(),
+                        usedforsecurity=False,
+                    ).hexdigest()
                 except OSError as e:
                     messages.error(
                         doc.pk,
