@@ -69,10 +69,10 @@
     </thead>
     <tbody>
       @for (task of tasks | slice: (page-1) * pageSize : page * pageSize; track task.id) {
-        <tr (click)="toggleSelected(task, $event); $event.stopPropagation();">
+        <tr (click)="toggleSelected(task); $event.stopPropagation();">
           <td>
             <div class="form-check">
-              <input type="checkbox" class="form-check-input" id="task{{task.id}}" [checked]="selectedTasks.has(task.id)" (click)="toggleSelected(task, $event); $event.stopPropagation();">
+              <input type="checkbox" class="form-check-input" id="task{{task.id}}" [checked]="selectedTasks.has(task.id)" (click)="toggleSelected(task); $event.stopPropagation();">
               <label class="form-check-label" for="task{{task.id}}"></label>
             </div>
           </td>
@@ -178,3 +178,342 @@
   </li>
 </ul>
 <div [ngbNavOutlet]="nav"></div>
+
+<section class="mt-4">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+    <div>
+      <h4 class="mb-1" i18n>Import Tasks</h4>
+      <p class="text-muted mb-0" i18n>
+        Import Tasks shows which files from an export were imported successfully and which ones were skipped or failed.
+      </p>
+    </div>
+    <div class="btn-toolbar col col-md-auto align-items-center gap-2">
+      <button class="btn btn-sm btn-outline-secondary me-2" (click)="clearSelection('import')" [hidden]="selectedImportTasks.size === 0">
+        <i-bs name="x"></i-bs>&nbsp;<ng-container i18n>Clear selection</ng-container>
+      </button>
+      <button class="btn btn-sm btn-outline-primary me-2" (click)="dismissTasks(undefined, 'import')" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }" [disabled]="tasksService.totalImportTasks === 0">
+        <i-bs name="check2-all"></i-bs>&nbsp;{{dismissImportButtonText}}
+      </button>
+    </div>
+  </div>
+
+  <ul ngbNav #importNav="ngbNav" [(activeId)]="importActiveTab" class="nav-tabs" (hidden)="duringTabChange('import')" (navChange)="beforeTabChange('import')">
+    <li ngbNavItem="failed">
+      <a ngbNavLink i18n>Failed@if (tasksService.failedImportFileTasks.length > 0) {
+        <span class="badge bg-danger ms-2">{{tasksService.failedImportFileTasks.length}}</span>
+      }</a>
+      <ng-template ngbNavContent>
+        <table class="table table-striped align-middle border shadow-sm">
+          <thead>
+            <tr>
+              <th scope="col">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="all-import-tasks-failed" [disabled]="currentImportTasks.length === 0" [checked]="toggleAllImports" (click)="toggleAll($event, 'import'); $event.stopPropagation();">
+                  <label class="form-check-label" for="all-import-tasks-failed"></label>
+                </div>
+              </th>
+              <th scope="col" i18n>Name</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Created</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Results</th>
+              <th scope="col" class="d-table-cell d-lg-none" i18n>Info</th>
+              <th scope="col" i18n>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of currentImportTasks | slice: (importPage-1) * pageSize : importPage * pageSize; track task.id) {
+              <tr (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                <td>
+                  <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="import-failed-task{{task.id}}" [checked]="selectedImportTasks.has(task.id)" (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                    <label class="form-check-label" for="import-failed-task{{task.id}}"></label>
+                  </div>
+                </td>
+                <td class="overflow-auto name-col">{{ task.task_file_name }}</td>
+                <td class="d-none d-lg-table-cell">{{ task.date_created | customDate:'short' }}</td>
+                <td class="d-none d-lg-table-cell">
+                  @if (task.result?.length > 50) {
+                    <div class="result" (click)="expandTask(task, 'import'); $event.stopPropagation();"
+                      [ngbPopover]="importFailedResultPopover" popoverClass="shadow small mobile" triggers="mouseenter:mouseleave" container="body">
+                      <span class="small d-none d-md-inline-block font-monospace text-muted">{{ task.result | slice:0:50 }}&hellip;</span>
+                    </div>
+                  }
+                  @if (task.result?.length <= 50) {
+                    <span class="small d-none d-md-inline-block font-monospace text-muted">{{ task.result }}</span>
+                  }
+                  <ng-template #importFailedResultPopover>
+                    <pre class="small mb-0">{{ task.result | slice:0:300 }}@if (task.result.length > 300) {
+                      &hellip;
+                    }</pre>
+                    @if (task.result?.length > 300) {
+                      <br/><em>(<ng-container i18n>click for full output</ng-container>)</em>
+                    }
+                  </ng-template>
+                </td>
+                <td class="d-lg-none">
+                  <button class="btn btn-link" (click)="expandTask(task, 'import'); $event.stopPropagation();">
+                    <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
+                  </button>
+                </td>
+                <td scope="row">
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task, 'import'); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                      <i-bs name="check"></i-bs>&nbsp;<ng-container i18n>Dismiss</ng-container>
+                    </button>
+                    <ng-container *pngxIfPermissions="{ action: PermissionAction.View, type: PermissionType.Document }">
+                      @if (task.related_document) {
+                        <button class="btn btn-sm btn-outline-primary" (click)="dismissImportAndGo(task); $event.stopPropagation();">
+                          <i-bs name="file-text"></i-bs>&nbsp;<ng-container i18n>Open Document</ng-container>
+                        </button>
+                      }
+                    </ng-container>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td class="p-0" [class.border-0]="expandedImportTask !== task.id" colspan="5">
+                  <pre #collapse="ngbCollapse" [ngbCollapse]="expandedImportTask !== task.id" class="small mb-0"><div class="small p-1 p-lg-3 ms-lg-3">{{ task.result }}</div></pre>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <div class="pb-3 d-sm-flex justify-content-between align-items-center">
+          @if (currentImportTasks.length > 0) {
+            <div class="pb-2 pb-sm-0">
+              <ng-container i18n>{currentImportTasks.length, plural, =1 {One {{this.activeImportTabLocalized}} task} other {{{currentImportTasks.length || 0}} total {{this.activeImportTabLocalized}} tasks}}</ng-container>
+              @if (selectedImportTasks.size > 0) {
+                <ng-container i18n>&nbsp;({{selectedImportTasks.size}} selected)</ng-container>
+              }
+            </div>
+          }
+          @if (currentImportTasks.length > pageSize) {
+            <ngb-pagination [(page)]="importPage" [pageSize]="pageSize" [collectionSize]="currentImportTasks.length" maxSize="8" size="sm"></ngb-pagination>
+          }
+        </div>
+      </ng-template>
+    </li>
+    <li ngbNavItem="completed">
+      <a ngbNavLink i18n>Complete@if (tasksService.completedImportFileTasks.length > 0) {
+        <span class="badge bg-secondary ms-2">{{tasksService.completedImportFileTasks.length}}</span>
+      }</a>
+      <ng-template ngbNavContent>
+        <table class="table table-striped align-middle border shadow-sm">
+          <thead>
+            <tr>
+              <th scope="col">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="all-import-tasks-completed" [disabled]="currentImportTasks.length === 0" [checked]="toggleAllImports" (click)="toggleAll($event, 'import'); $event.stopPropagation();">
+                  <label class="form-check-label" for="all-import-tasks-completed"></label>
+                </div>
+              </th>
+              <th scope="col" i18n>Name</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Created</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Results</th>
+              <th scope="col" class="d-table-cell d-lg-none" i18n>Info</th>
+              <th scope="col" i18n>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of currentImportTasks | slice: (importPage-1) * pageSize : importPage * pageSize; track task.id) {
+              <tr (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                <td>
+                  <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="import-complete-task{{task.id}}" [checked]="selectedImportTasks.has(task.id)" (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                    <label class="form-check-label" for="import-complete-task{{task.id}}"></label>
+                  </div>
+                </td>
+                <td class="overflow-auto name-col">{{ task.task_file_name }}</td>
+                <td class="d-none d-lg-table-cell">{{ task.date_created | customDate:'short' }}</td>
+                <td class="d-none d-lg-table-cell">
+                  @if (task.result?.length > 50) {
+                    <div class="result" (click)="expandTask(task, 'import'); $event.stopPropagation();"
+                      [ngbPopover]="importCompletedResultPopover" popoverClass="shadow small mobile" triggers="mouseenter:mouseleave" container="body">
+                      <span class="small d-none d-md-inline-block font-monospace text-muted">{{ task.result | slice:0:50 }}&hellip;</span>
+                    </div>
+                  }
+                  @if (task.result?.length <= 50) {
+                    <span class="small d-none d-md-inline-block font-monospace text-muted">{{ task.result }}</span>
+                  }
+                  <ng-template #importCompletedResultPopover>
+                    <pre class="small mb-0">{{ task.result | slice:0:300 }}@if (task.result.length > 300) {
+                      &hellip;
+                    }</pre>
+                    @if (task.result?.length > 300) {
+                      <br/><em>(<ng-container i18n>click for full output</ng-container>)</em>
+                    }
+                  </ng-template>
+                </td>
+                <td class="d-lg-none">
+                  <button class="btn btn-link" (click)="expandTask(task, 'import'); $event.stopPropagation();">
+                    <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
+                  </button>
+                </td>
+                <td scope="row">
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task, 'import'); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                      <i-bs name="check"></i-bs>&nbsp;<ng-container i18n>Dismiss</ng-container>
+                    </button>
+                    <ng-container *pngxIfPermissions="{ action: PermissionAction.View, type: PermissionType.Document }">
+                      @if (task.related_document) {
+                        <button class="btn btn-sm btn-outline-primary" (click)="dismissImportAndGo(task); $event.stopPropagation();">
+                          <i-bs name="file-text"></i-bs>&nbsp;<ng-container i18n>Open Document</ng-container>
+                        </button>
+                      }
+                    </ng-container>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td class="p-0" [class.border-0]="expandedImportTask !== task.id" colspan="5">
+                  <pre #collapse="ngbCollapse" [ngbCollapse]="expandedImportTask !== task.id" class="small mb-0"><div class="small p-1 p-lg-3 ms-lg-3">{{ task.result }}</div></pre>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <div class="pb-3 d-sm-flex justify-content-between align-items-center">
+          @if (currentImportTasks.length > 0) {
+            <div class="pb-2 pb-sm-0">
+              <ng-container i18n>{currentImportTasks.length, plural, =1 {One {{this.activeImportTabLocalized}} task} other {{{currentImportTasks.length || 0}} total {{this.activeImportTabLocalized}} tasks}}</ng-container>
+              @if (selectedImportTasks.size > 0) {
+                <ng-container i18n>&nbsp;({{selectedImportTasks.size}} selected)</ng-container>
+              }
+            </div>
+          }
+          @if (currentImportTasks.length > pageSize) {
+            <ngb-pagination [(page)]="importPage" [pageSize]="pageSize" [collectionSize]="currentImportTasks.length" maxSize="8" size="sm"></ngb-pagination>
+          }
+        </div>
+      </ng-template>
+    </li>
+    <li ngbNavItem="started">
+      <a ngbNavLink i18n>Started@if (tasksService.startedImportFileTasks.length > 0) {
+        <span class="badge bg-secondary ms-2">{{tasksService.startedImportFileTasks.length}}</span>
+      }</a>
+      <ng-template ngbNavContent>
+        <table class="table table-striped align-middle border shadow-sm">
+          <thead>
+            <tr>
+              <th scope="col">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="all-import-tasks-started" [disabled]="currentImportTasks.length === 0" [checked]="toggleAllImports" (click)="toggleAll($event, 'import'); $event.stopPropagation();">
+                  <label class="form-check-label" for="all-import-tasks-started"></label>
+                </div>
+              </th>
+              <th scope="col" i18n>Name</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Created</th>
+              <th scope="col" class="d-table-cell d-lg-none" i18n>Info</th>
+              <th scope="col" i18n>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of currentImportTasks | slice: (importPage-1) * pageSize : importPage * pageSize; track task.id) {
+              <tr (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                <td>
+                  <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="import-started-task{{task.id}}" [checked]="selectedImportTasks.has(task.id)" (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                    <label class="form-check-label" for="import-started-task{{task.id}}"></label>
+                  </div>
+                </td>
+                <td class="overflow-auto name-col">{{ task.task_file_name }}</td>
+                <td class="d-none d-lg-table-cell">{{ task.date_created | customDate:'short' }}</td>
+                <td class="d-lg-none">
+                  <button class="btn btn-link" (click)="expandTask(task, 'import'); $event.stopPropagation();">
+                    <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
+                  </button>
+                </td>
+                <td scope="row">
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task, 'import'); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                      <i-bs name="check"></i-bs>&nbsp;<ng-container i18n>Dismiss</ng-container>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <div class="pb-3 d-sm-flex justify-content-between align-items-center">
+          @if (currentImportTasks.length > 0) {
+            <div class="pb-2 pb-sm-0">
+              <ng-container i18n>{currentImportTasks.length, plural, =1 {One {{this.activeImportTabLocalized}} task} other {{{currentImportTasks.length || 0}} total {{this.activeImportTabLocalized}} tasks}}</ng-container>
+              @if (selectedImportTasks.size > 0) {
+                <ng-container i18n>&nbsp;({{selectedImportTasks.size}} selected)</ng-container>
+              }
+            </div>
+          }
+          @if (currentImportTasks.length > pageSize) {
+            <ngb-pagination [(page)]="importPage" [pageSize]="pageSize" [collectionSize]="currentImportTasks.length" maxSize="8" size="sm"></ngb-pagination>
+          }
+        </div>
+      </ng-template>
+    </li>
+    <li ngbNavItem="queued">
+      <a ngbNavLink i18n>Queued@if (tasksService.queuedImportFileTasks.length > 0) {
+        <span class="badge bg-secondary ms-2">{{tasksService.queuedImportFileTasks.length}}</span>
+      }</a>
+      <ng-template ngbNavContent>
+        <table class="table table-striped align-middle border shadow-sm">
+          <thead>
+            <tr>
+              <th scope="col">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="all-import-tasks-queued" [disabled]="currentImportTasks.length === 0" [checked]="toggleAllImports" (click)="toggleAll($event, 'import'); $event.stopPropagation();">
+                  <label class="form-check-label" for="all-import-tasks-queued"></label>
+                </div>
+              </th>
+              <th scope="col" i18n>Name</th>
+              <th scope="col" class="d-none d-lg-table-cell" i18n>Created</th>
+              <th scope="col" class="d-table-cell d-lg-none" i18n>Info</th>
+              <th scope="col" i18n>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of currentImportTasks | slice: (importPage-1) * pageSize : importPage * pageSize; track task.id) {
+              <tr (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                <td>
+                  <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="import-queued-task{{task.id}}" [checked]="selectedImportTasks.has(task.id)" (click)="toggleSelected(task, 'import'); $event.stopPropagation();">
+                    <label class="form-check-label" for="import-queued-task{{task.id}}"></label>
+                  </div>
+                </td>
+                <td class="overflow-auto name-col">{{ task.task_file_name }}</td>
+                <td class="d-none d-lg-table-cell">{{ task.date_created | customDate:'short' }}</td>
+                <td class="d-lg-none">
+                  <button class="btn btn-link" (click)="expandTask(task, 'import'); $event.stopPropagation();">
+                    <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
+                  </button>
+                </td>
+                <td scope="row">
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task, 'import'); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                      <i-bs name="check"></i-bs>&nbsp;<ng-container i18n>Dismiss</ng-container>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <div class="pb-3 d-sm-flex justify-content-between align-items-center">
+          @if (currentImportTasks.length > 0) {
+            <div class="pb-2 pb-sm-0">
+              <ng-container i18n>{currentImportTasks.length, plural, =1 {One {{this.activeImportTabLocalized}} task} other {{{currentImportTasks.length || 0}} total {{this.activeImportTabLocalized}} tasks}}</ng-container>
+              @if (selectedImportTasks.size > 0) {
+                <ng-container i18n>&nbsp;({{selectedImportTasks.size}} selected)</ng-container>
+              }
+            </div>
+          }
+          @if (currentImportTasks.length > pageSize) {
+            <ngb-pagination [(page)]="importPage" [pageSize]="pageSize" [collectionSize]="currentImportTasks.length" maxSize="8" size="sm"></ngb-pagination>
+          }
+        </div>
+      </ng-template>
+    </li>
+  </ul>
+  <div [ngbNavOutlet]="importNav"></div>
+</section>

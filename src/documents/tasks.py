@@ -68,7 +68,7 @@ MANUAL_S3_EXPORT_FILENAME_PREFIX = "paperless-manual-export"
 
 
 def build_manual_s3_export_filename() -> str:
-    timestamp = timezone.now().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = timezone.now().strftime("%Y%m%dT%H%M%S%fZ")
     return f"{MANUAL_S3_EXPORT_FILENAME_PREFIX}-{timestamp}.zip"
 
 
@@ -248,6 +248,8 @@ def _get_manual_s3_transfer_storage(storage_id: int):
 def export_documents_to_s3_storage(storage_id: int):
     storage_config, storage = _get_manual_s3_transfer_storage(storage_id)
     export_filename = build_manual_s3_export_filename()
+    while storage.exists(export_filename):
+        export_filename = build_manual_s3_export_filename()
 
     settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
@@ -259,6 +261,8 @@ def export_documents_to_s3_storage(storage_id: int):
             temp_dir,
             zip=True,
             zip_name=export_filename.removesuffix(".zip"),
+            use_filename_format=True,
+            use_folder_prefix=True,
             no_progress_bar=True,
         )
         export_path = Path(temp_dir) / export_filename
@@ -272,7 +276,11 @@ def export_documents_to_s3_storage(storage_id: int):
 
 
 @shared_task
-def import_documents_from_s3_storage(storage_id: int, export_name: str):
+def import_documents_from_s3_storage(
+    storage_id: int,
+    export_name: str,
+    owner_id: int | None = None,
+):
     storage_config, storage = _get_manual_s3_transfer_storage(storage_id)
 
     if not storage.exists(export_name):
@@ -293,13 +301,14 @@ def import_documents_from_s3_storage(storage_id: int, export_name: str):
         ):
             shutil.copyfileobj(source_handle, target_handle)
 
-        call_command(
+        result = call_command(
             "document_importer",
             import_path,
             no_progress_bar=True,
+            task_owner_id=owner_id,
         )
 
-    return (
+    return result or (
         f'Successfully imported documents from S3 storage "{storage_config.name}" '
         f"using {export_name}."
     )

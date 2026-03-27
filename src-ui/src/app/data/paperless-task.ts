@@ -8,9 +8,12 @@ export enum PaperlessTaskType {
 
 export enum PaperlessTaskName {
   ConsumeFile = 'consume_file',
+  ImportFile = 'import_file',
   TrainClassifier = 'train_classifier',
   SanityCheck = 'check_sanity',
   IndexOptimize = 'index_optimize',
+  ExportS3Storage = 'export_s3_storage',
+  ImportS3Storage = 'import_s3_storage',
 }
 
 export enum PaperlessTaskStatus {

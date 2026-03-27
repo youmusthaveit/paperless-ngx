@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http'
+import { HttpClient, HttpResponse } from '@angular/common/http'
 import { Injectable, inject } from '@angular/core'
 import { Observable, first, map } from 'rxjs'
 import { environment } from 'src/environments/environment'
@@ -160,6 +160,35 @@ export class ConfigService {
   getS3StorageExports(storageId: number): Observable<S3StorageExport[]> {
     return this.http
       .get<S3StorageExport[]>(`${this.s3StorageUrl}${storageId}/exports/`)
+      .pipe(first())
+  }
+
+  downloadS3StorageExport(
+    storageId: number,
+    exportName: string
+  ): Observable<HttpResponse<Blob>> {
+    return this.http
+      .post(
+        `${this.s3StorageUrl}${storageId}/download-export/`,
+        {
+          export_name: exportName,
+        },
+        {
+          observe: 'response',
+          responseType: 'blob',
+        }
+      )
+      .pipe(first())
+  }
+
+  deleteS3StorageExport(
+    storageId: number,
+    exportName: string
+  ): Observable<object> {
+    return this.http
+      .post(`${this.s3StorageUrl}${storageId}/delete-export/`, {
+        export_name: exportName,
+      })
       .pipe(first())
   }
 }

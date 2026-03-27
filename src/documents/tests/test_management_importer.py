@@ -2,15 +2,18 @@ import json
 import tempfile
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 from zipfile import ZipFile
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
 from documents.management.commands.document_importer import Command
 from documents.models import Document
+from documents.models import PaperlessTask
 from documents.settings import EXPORTER_ARCHIVE_NAME
 from documents.settings import EXPORTER_FILE_NAME
 from documents.tests.utils import DirectoriesMixin
@@ -215,6 +218,161 @@ class TestCommandImport(
             "Found file temp/file.pdf, this might indicate a non-empty installation",
             str(stdout.read()),
         )
+
+    def test_import_files_from_manifest_creates_import_result_tasks(self):
+        owner = User.objects.create(username="import-owner")
+
+        failed_doc = Document.objects.create(
+            title="Failed",
+            content="",
+            checksum="failed-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        successful_doc = Document.objects.create(
+            title="Success",
+            content="",
+            checksum="success-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+
+        failed_source = self.dirs.scratch_dir / "failed.pdf"
+        failed_source.write_bytes(b"failed")
+        successful_source = self.dirs.scratch_dir / "success.pdf"
+        successful_source.write_bytes(b"success")
+
+        failed_target = self.dirs.originals_dir / failed_doc.source_name
+        failed_target.parent.mkdir(parents=True, exist_ok=True)
+        failed_target.write_bytes(b"existing")
+
+        cmd = Command()
+        cmd.source = self.dirs.scratch_dir
+        cmd.no_progress_bar = True
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+        cmd.preexisting_original_paths = {failed_doc.source_name}
+        cmd.imported_documents = 0
+        cmd.failed_documents = 0
+        cmd.manifest = [
+            {
+                "model": "documents.document",
+                "pk": failed_doc.pk,
+                EXPORTER_FILE_NAME: failed_source.name,
+            },
+            {
+                "model": "documents.document",
+                "pk": successful_doc.pk,
+                EXPORTER_FILE_NAME: successful_source.name,
+            },
+        ]
+
+        with mock.patch.object(Document, "save", autospec=True):
+            cmd._import_files_from_manifest()
+
+        self.assertTrue((self.dirs.originals_dir / successful_doc.source_name).exists())
+        self.assertEqual(Document.objects.count(), 1)
+        self.assertEqual(Document.global_objects.count(), 1)
+
+        tasks = PaperlessTask.objects.order_by("task_file_name")
+        self.assertEqual(tasks.count(), 2)
+
+        failed_task, successful_task = tasks
+        self.assertEqual(failed_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
+        self.assertEqual(failed_task.status, "FAILURE")
+        self.assertIn("already exists", failed_task.result)
+        self.assertIsNotNone(failed_task.date_started)
+        self.assertIsNotNone(failed_task.date_done)
+        self.assertEqual(successful_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
+        self.assertEqual(successful_task.status, "SUCCESS")
+        self.assertIn("New document id", successful_task.result)
+        self.assertIsNotNone(successful_task.date_started)
+        self.assertIsNotNone(successful_task.date_done)
+
+    def test_initialize_import_tasks_creates_pending_tasks_for_all_documents(self):
+        owner = User.objects.create(username="import-owner")
+        first_doc = Document.objects.create(
+            title="First",
+            content="",
+            checksum="first-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        second_doc = Document.objects.create(
+            title="Second",
+            content="",
+            checksum="second-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+
+        cmd = Command()
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+
+        cmd._initialize_import_tasks(
+            [
+                {"model": "documents.document", "pk": first_doc.pk},
+                {"model": "documents.document", "pk": second_doc.pk},
+            ],
+        )
+
+        tasks = PaperlessTask.objects.order_by("task_file_name")
+        self.assertEqual(tasks.count(), 2)
+        self.assertEqual(tasks[0].status, "PENDING")
+        self.assertEqual(tasks[1].status, "PENDING")
+        self.assertIsNone(tasks[0].date_started)
+        self.assertIsNone(tasks[1].date_started)
+
+    def test_import_files_from_manifest_replaces_orphaned_originals(self):
+        owner = User.objects.create(username="import-owner")
+        document = Document.objects.create(
+            title="Recovered",
+            content="",
+            checksum="recovered-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        Document.objects.filter(pk=document.pk).update(
+            filename="Vertrag/2026/03/Kaufvertrag_IT_System.pdf",
+        )
+        document.refresh_from_db()
+
+        source_file = self.dirs.scratch_dir / "recovered.pdf"
+        source_file.write_bytes(b"fresh-import")
+
+        orphan_target = self.dirs.originals_dir / document.source_name
+        orphan_target.parent.mkdir(parents=True, exist_ok=True)
+        orphan_target.write_bytes(b"orphaned")
+
+        cmd = Command()
+        cmd.source = self.dirs.scratch_dir
+        cmd.no_progress_bar = True
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+        cmd.preexisting_original_paths = set()
+        cmd.imported_documents = 0
+        cmd.failed_documents = 0
+        cmd.manifest = [
+            {
+                "model": "documents.document",
+                "pk": document.pk,
+                EXPORTER_FILE_NAME: source_file.name,
+            },
+        ]
+
+        with mock.patch.object(Document, "save", autospec=True):
+            cmd._import_files_from_manifest()
+
+        self.assertEqual(cmd.imported_documents, 1)
+        self.assertEqual(cmd.failed_documents, 0)
+        self.assertEqual(PaperlessTask.objects.count(), 1)
+        self.assertEqual(PaperlessTask.objects.get().status, "SUCCESS")
 
     def test_import_with_user_exists(self):
         """

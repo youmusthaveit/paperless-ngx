@@ -1,5 +1,12 @@
 import { AsyncPipe } from '@angular/common'
-import { Component, OnDestroy, OnInit, inject } from '@angular/core'
+import { HttpResponse } from '@angular/common/http'
+import {
+  Component,
+  OnDestroy,
+  OnInit,
+  TemplateRef,
+  inject,
+} from '@angular/core'
 import {
   AbstractControl,
   FormControl,
@@ -7,8 +14,9 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms'
-import { NgbNavModule } from '@ng-bootstrap/ng-bootstrap'
+import { NgbModal, NgbModalRef, NgbNavModule } from '@ng-bootstrap/ng-bootstrap'
 import { DirtyComponent, dirtyCheck } from '@ngneat/dirty-check-forms'
+import { saveAs } from 'file-saver'
 import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
 import {
   BehaviorSubject,
@@ -16,7 +24,9 @@ import {
   Subscription,
   first,
   forkJoin,
+  switchMap,
   takeUntil,
+  timer,
 } from 'rxjs'
 import {
   ConfigCategory,
@@ -25,9 +35,16 @@ import {
   PaperlessConfig,
   PaperlessConfigOptions,
 } from 'src/app/data/paperless-config'
+import {
+  PaperlessTask,
+  PaperlessTaskName,
+  PaperlessTaskStatus,
+  PaperlessTaskType,
+} from 'src/app/data/paperless-task'
 import { S3Storage, S3StorageExport } from 'src/app/data/s3-storage'
 import { ConfigService } from 'src/app/services/config.service'
 import { SettingsService } from 'src/app/services/settings.service'
+import { TasksService } from 'src/app/services/tasks.service'
 import { ToastService } from 'src/app/services/toast.service'
 import { FileComponent } from '../../common/input/file/file.component'
 import { NumberComponent } from '../../common/input/number/number.component'
@@ -62,6 +79,8 @@ export class ConfigComponent
   private configService = inject(ConfigService)
   private toastService = inject(ToastService)
   private settingsService = inject(SettingsService)
+  private tasksService = inject(TasksService)
+  private modalService = inject(NgbModal)
 
   public readonly ConfigOptionType = ConfigOptionType
   public readonly ConfigCategory = ConfigCategory
@@ -72,12 +91,17 @@ export class ConfigComponent
   public errors = {}
   public testingStorage = false
   public runningS3Transfer = false
+  public downloadingS3ExportKey: string | null = null
+  public deletingS3ExportKey: string | null = null
   public savingS3Storage = false
   public s3Storages: S3Storage[] = []
   public expandedExportsStorageId: number | null = null
   public loadingExportsStorageId: number | null = null
   public s3StorageExports: Record<number, S3StorageExport[]> = {}
+  public s3TransferTasks: Record<number, PaperlessTask> = {}
   public s3StorageSelectItems: Array<{ id: number; name: string }> = []
+  private s3StorageModalRef: NgbModalRef | null = null
+  private s3TransferPollingSubscriptions: Record<number, Subscription> = {}
   public s3StorageForm = new FormGroup({
     id: new FormControl<number | null>(null),
     name: new FormControl<string | null>(null),
@@ -103,6 +127,14 @@ export class ConfigComponent
     return PaperlessConfigOptions.filter((o) => o.category === category)
   }
 
+  getPrimaryStorageOptions(): ConfigOption[] {
+    return this.getCategoryOptions(ConfigCategory.Storage)
+  }
+
+  getBackupOptions(): ConfigOption[] {
+    return this.getCategoryOptions(ConfigCategory.Backup)
+  }
+
   initialConfig: PaperlessConfig
   store: BehaviorSubject<any>
   storeSub: Subscription
@@ -114,7 +146,7 @@ export class ConfigComponent
     PaperlessConfigOptions.forEach((option) => {
       this.configForm.addControl(option.key, new FormControl())
     })
-    this.editS3Storage()
+    this.resetS3StorageForm()
   }
 
   ngOnInit(): void {
@@ -165,6 +197,9 @@ export class ConfigComponent
   }
 
   ngOnDestroy(): void {
+    Object.values(this.s3TransferPollingSubscriptions).forEach((subscription) =>
+      subscription.unsubscribe()
+    )
     this.unsubscribeNotifier.next(true)
     this.unsubscribeNotifier.complete()
   }
@@ -276,7 +311,7 @@ export class ConfigComponent
     return !!this.configForm.get('documents_backup_s3_storage')?.value
   }
 
-  public editS3Storage(storage?: S3Storage) {
+  private resetS3StorageForm(storage?: S3Storage) {
     this.s3StorageForm.reset(
       storage ?? {
         id: null,
@@ -297,15 +332,52 @@ export class ConfigComponent
     )
   }
 
-  public copyS3Storage(storage: S3Storage) {
-    this.editS3Storage({
+  public openS3StorageDialog(
+    content: TemplateRef<unknown>,
+    storage?: S3Storage
+  ) {
+    this.resetS3StorageForm(storage)
+    this.s3StorageModalRef?.dismiss()
+    this.s3StorageModalRef = this.modalService.open(content, {
+      backdrop: 'static',
+      size: 'lg',
+    })
+    this.s3StorageModalRef.result.finally(() => {
+      this.s3StorageModalRef = null
+    })
+  }
+
+  public copyS3Storage(content: TemplateRef<unknown>, storage: S3Storage) {
+    this.resetS3StorageForm({
       ...storage,
       id: null,
       name: `${storage.name} (Copy)`,
       secret_access_key: null,
     })
+    this.s3StorageModalRef?.dismiss()
+    this.s3StorageModalRef = this.modalService.open(content, {
+      backdrop: 'static',
+      size: 'lg',
+    })
+    this.s3StorageModalRef.result.finally(() => {
+      this.s3StorageModalRef = null
+    })
     this.toastService.showInfo(
       $localize`S3 storage copied into the form. Please enter the secret access key before saving.`
+    )
+  }
+
+  public clearS3StorageForm() {
+    this.resetS3StorageForm()
+  }
+
+  public isS3StorageFormValid(): boolean {
+    return !!(
+      this.s3StorageForm.get('name')?.value &&
+      this.s3StorageForm.get('bucket')?.value &&
+      this.s3StorageForm.get('endpoint_url')?.value &&
+      this.s3StorageForm.get('access_key_id')?.value &&
+      this.s3StorageForm.get('secret_access_key')?.value
     )
   }
 
@@ -332,7 +404,8 @@ export class ConfigComponent
             )
           }
           this.refreshS3StorageChoices()
-          this.editS3Storage()
+          this.resetS3StorageForm()
+          this.s3StorageModalRef?.close()
           this.toastService.showInfo($localize`S3 storage saved`)
         },
         error: (e) => {
@@ -371,7 +444,7 @@ export class ConfigComponent
               ?.setValue(null as never)
           }
           if (this.s3StorageForm.get('id')?.value === storage.id) {
-            this.editS3Storage()
+            this.resetS3StorageForm()
           }
           this.toastService.showInfo($localize`S3 storage deleted`)
         },
@@ -421,7 +494,17 @@ export class ConfigComponent
       .pipe(takeUntil(this.unsubscribeNotifier), first())
       .subscribe({
         next: (response) => {
-          this.runningS3Transfer = false
+          this.s3TransferTasks[storage.id] = {
+            id: 0,
+            type: PaperlessTaskType.ManualTask,
+            status: PaperlessTaskStatus.Pending,
+            acknowledged: false,
+            task_id: response.task_id,
+            task_file_name: storage.name,
+            task_name: PaperlessTaskName.ExportS3Storage,
+            date_created: new Date(),
+          }
+          this.watchS3TransferTask(storage, response.task_id, true)
           this.loadS3StorageExports(storage, true)
           this.toastService.showInfo(response.detail)
         },
@@ -450,7 +533,17 @@ export class ConfigComponent
       .pipe(takeUntil(this.unsubscribeNotifier), first())
       .subscribe({
         next: (response) => {
-          this.runningS3Transfer = false
+          this.s3TransferTasks[storage.id] = {
+            id: 0,
+            type: PaperlessTaskType.ManualTask,
+            status: PaperlessTaskStatus.Pending,
+            acknowledged: false,
+            task_id: response.task_id,
+            task_file_name: storage.name,
+            task_name: PaperlessTaskName.ImportS3Storage,
+            date_created: new Date(),
+          }
+          this.watchS3TransferTask(storage, response.task_id, false)
           this.toastService.showInfo(response.detail)
         },
         error: (e) => {
@@ -461,6 +554,152 @@ export class ConfigComponent
           )
         },
       })
+  }
+
+  public downloadNamedS3Export(storage: S3Storage, exportName: string) {
+    const downloadKey = `${storage.id}:${exportName}`
+    this.downloadingS3ExportKey = downloadKey
+
+    this.configService
+      .downloadS3StorageExport(storage.id, exportName)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          saveAs(
+            response.body,
+            this.getDownloadFilename(response) ?? exportName
+          )
+          this.downloadingS3ExportKey = null
+        },
+        error: (e) => {
+          this.downloadingS3ExportKey = null
+          this.toastService.showError(
+            $localize`An error occurred downloading the S3 export`,
+            e
+          )
+        },
+      })
+  }
+
+  public deleteNamedS3Export(storage: S3Storage, exportName: string) {
+    if (
+      !window.confirm(
+        $localize`Delete the export "${exportName}" from the S3 storage "${storage.name}"?`
+      )
+    ) {
+      return
+    }
+
+    const deleteKey = `${storage.id}:${exportName}`
+    this.deletingS3ExportKey = deleteKey
+
+    this.configService
+      .deleteS3StorageExport(storage.id, exportName)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: () => {
+          this.deletingS3ExportKey = null
+          this.s3StorageExports[storage.id] = (
+            this.s3StorageExports[storage.id] ?? []
+          ).filter((item) => item.name !== exportName)
+          this.toastService.showInfo($localize`Export deleted`)
+        },
+        error: (e) => {
+          this.deletingS3ExportKey = null
+          this.toastService.showError(
+            $localize`An error occurred deleting the export`,
+            e
+          )
+        },
+      })
+  }
+
+  public getS3TransferStatusText(storageId: number): string | null {
+    const task = this.s3TransferTasks[storageId]
+    if (!task) {
+      return null
+    }
+
+    switch (task.status) {
+      case PaperlessTaskStatus.Pending:
+        return $localize`Status: queued`
+      case PaperlessTaskStatus.Started:
+        return $localize`Status: running`
+      case PaperlessTaskStatus.Complete:
+        return $localize`Status: completed`
+      case PaperlessTaskStatus.Failed:
+        return $localize`Status: failed`
+      default:
+        return $localize`Status: unknown`
+    }
+  }
+
+  public isS3TransferActive(storageId: number): boolean {
+    const task = this.s3TransferTasks[storageId]
+    return (
+      task?.status === PaperlessTaskStatus.Pending ||
+      task?.status === PaperlessTaskStatus.Started
+    )
+  }
+
+  private watchS3TransferTask(
+    storage: S3Storage,
+    taskId: string,
+    refreshExportsOnSuccess: boolean
+  ) {
+    this.s3TransferPollingSubscriptions[storage.id]?.unsubscribe()
+    this.runningS3Transfer = true
+
+    this.s3TransferPollingSubscriptions[storage.id] = timer(0, 2000)
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        switchMap(() => this.tasksService.getByTaskId(taskId))
+      )
+      .subscribe({
+        next: (tasks) => {
+          const task = tasks?.[0]
+          if (!task) {
+            return
+          }
+
+          this.s3TransferTasks[storage.id] = task
+
+          if (
+            task.status === PaperlessTaskStatus.Complete ||
+            task.status === PaperlessTaskStatus.Failed
+          ) {
+            this.runningS3Transfer = false
+            this.s3TransferPollingSubscriptions[storage.id]?.unsubscribe()
+            delete this.s3TransferPollingSubscriptions[storage.id]
+            if (
+              refreshExportsOnSuccess &&
+              task.status === PaperlessTaskStatus.Complete
+            ) {
+              this.loadS3StorageExports(storage, true)
+            }
+          }
+        },
+        error: () => {
+          this.runningS3Transfer = false
+          this.s3TransferPollingSubscriptions[storage.id]?.unsubscribe()
+          delete this.s3TransferPollingSubscriptions[storage.id]
+        },
+      })
+  }
+
+  private getDownloadFilename(response: HttpResponse<Blob>): string | null {
+    const disposition = response.headers.get('content-disposition')
+    if (!disposition) {
+      return null
+    }
+
+    const encodedFilenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+    if (encodedFilenameMatch?.[1]) {
+      return decodeURIComponent(encodedFilenameMatch[1])
+    }
+
+    const filenameMatch = disposition.match(/filename=\"?([^\";]+)\"?/i)
+    return filenameMatch?.[1] ?? null
   }
 
   public toggleS3StorageExports(storage: S3Storage) {

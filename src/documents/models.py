@@ -696,6 +696,7 @@ class PaperlessTask(ModelWithOwner):
 
     class TaskName(models.TextChoices):
         CONSUME_FILE = ("consume_file", _("Consume File"))
+        IMPORT_FILE = ("import_file", _("Import File"))
         TRAIN_CLASSIFIER = ("train_classifier", _("Train Classifier"))
         CHECK_SANITY = ("check_sanity", _("Check Sanity"))
         INDEX_OPTIMIZE = ("index_optimize", _("Index Optimize"))

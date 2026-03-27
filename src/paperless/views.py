@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 from allauth.mfa import signals
@@ -11,10 +12,12 @@ from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.models import SocialAccount
 from celery import states
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
 from django.db.models.functions import Lower
 from django.http import FileResponse
 from django.http import HttpResponseBadRequest
@@ -45,6 +48,7 @@ from documents.storage import get_s3_configuration_storage
 from documents.storage import test_document_backup_storage_connection
 from documents.storage import test_document_storage_connection
 from documents.storage import test_s3_connection
+from documents.tasks import build_manual_s3_export_filename
 from documents.tasks import export_documents_to_s3_storage
 from documents.tasks import import_documents_from_s3_storage
 from paperless.filters import GroupFilterSet
@@ -316,6 +320,14 @@ class S3StorageConfigurationViewSet(ModelViewSet):
             status=202,
         )
 
+    @staticmethod
+    def _validate_export_name(export_name: object) -> str:
+        if not isinstance(export_name, str) or not export_name:
+            raise ValidationError({"export_name": "This field is required."})
+        if Path(export_name).name != export_name or not export_name.endswith(".zip"):
+            raise ValidationError({"export_name": "Invalid export name."})
+        return export_name
+
     @action(detail=True, methods=["get"], url_path="exports")
     def list_exports(self, request, pk=None):
         storage = self.get_object()
@@ -343,21 +355,75 @@ class S3StorageConfigurationViewSet(ModelViewSet):
 
         return Response(exports)
 
+    @action(detail=True, methods=["post"], url_path="download-export")
+    def download_export_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = self._validate_export_name(request.data.get("export_name"))
+
+        storage_backend = get_s3_configuration_storage(
+            storage,
+            location="manual-transfer",
+        )
+        try:
+            if not storage_backend.exists(export_name):
+                raise ValidationError({"export_name": "Export not found."})
+
+            return FileResponse(
+                storage_backend.open(export_name, "rb"),
+                as_attachment=True,
+                filename=export_name,
+                content_type="application/zip",
+            )
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to download export "{export_name}": {exc}'},
+            ) from exc
+
+    @action(detail=True, methods=["post"], url_path="delete-export")
+    def delete_export_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = self._validate_export_name(request.data.get("export_name"))
+
+        storage_backend = get_s3_configuration_storage(
+            storage,
+            location="manual-transfer",
+        )
+        try:
+            if not storage_backend.exists(export_name):
+                raise ValidationError({"export_name": "Export not found."})
+
+            storage_backend.delete(export_name)
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to delete export "{export_name}": {exc}'},
+            ) from exc
+
+        return Response(
+            {"detail": f'Successfully deleted export "{export_name}".'},
+        )
+
     @action(detail=True, methods=["post"], url_path="import")
     def import_from_storage(self, request, pk=None):
         if not request.user.is_superuser:
             return HttpResponseForbidden("Insufficient permissions")
 
         storage = self.get_object()
-        export_name = request.data.get("export_name")
-        if not isinstance(export_name, str) or not export_name:
-            raise ValidationError({"export_name": "This field is required."})
-        if Path(export_name).name != export_name or not export_name.endswith(".zip"):
-            raise ValidationError({"export_name": "Invalid export name."})
+        export_name = self._validate_export_name(request.data.get("export_name"))
 
         async_result = import_documents_from_s3_storage.delay(
             storage.pk,
             export_name,
+            request.user.pk,
         )
         PaperlessTask.objects.create(
             type=PaperlessTask.TaskType.MANUAL_TASK,
@@ -628,6 +694,43 @@ class ApplicationConfigurationViewSet(ModelViewSet):
             ) from exc
 
         return Response({"detail": "S3 backup storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="download-export")
+    def download_export(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        export_filename = build_manual_s3_export_filename()
+        settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+        temp_dir = TemporaryDirectory(
+            dir=settings.SCRATCH_DIR,
+            prefix="paperless-download-export-",
+        )
+        export_dir = Path(temp_dir.name)
+
+        call_command(
+            "document_exporter",
+            export_dir,
+            zip=True,
+            zip_name=export_filename.removesuffix(".zip"),
+            use_filename_format=True,
+            use_folder_prefix=True,
+            no_progress_bar=True,
+        )
+
+        export_path = export_dir / export_filename
+        if not export_path.exists():
+            temp_dir.cleanup()
+            raise ValidationError({"detail": "Export file was not created."})
+
+        response = FileResponse(
+            export_path.open("rb"),
+            as_attachment=True,
+            filename=export_filename,
+            content_type="application/zip",
+        )
+        response._resource_closers.append(temp_dir.cleanup)
+        return response
 
 
 @extend_schema_view(

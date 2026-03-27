@@ -1,4 +1,6 @@
 import shutil
+import zipfile
+from datetime import UTC
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
@@ -17,6 +19,7 @@ from documents.sanity_checker import SanityCheckMessages
 from documents.tests.test_classifier import dummy_preprocess
 from documents.tests.utils import DirectoriesMixin
 from documents.tests.utils import FileSystemAssertsMixin
+from paperless.models import S3StorageConfiguration
 
 
 class TestIndexReindex(DirectoriesMixin, TestCase):
@@ -165,6 +168,97 @@ class TestBulkUpdate(DirectoriesMixin, TestCase):
         )
 
         tasks.bulk_update_documents([doc1.pk])
+
+
+class TestManualS3TransferTasks(DirectoriesMixin, TestCase):
+    @mock.patch("documents.tasks.timezone.now")
+    def test_build_manual_s3_export_filename_includes_subseconds(self, now_mock):
+        now_mock.return_value = timezone.datetime(
+            2026,
+            3,
+            27,
+            12,
+            0,
+            0,
+            123456,
+            tzinfo=UTC,
+        )
+
+        export_name = tasks.build_manual_s3_export_filename()
+
+        self.assertEqual(
+            export_name,
+            "paperless-manual-export-20260327T120000123456Z.zip",
+        )
+
+    @mock.patch("documents.tasks.call_command")
+    @mock.patch(
+        "documents.tasks.build_manual_s3_export_filename",
+        return_value="paperless-manual-export-20260327T120000123456Z.zip",
+    )
+    def test_export_documents_to_s3_storage_uses_folder_structure(
+        self,
+        _build_export_filename,
+        call_command_mock,
+    ):
+        storage_config = S3StorageConfiguration(name="Backup Storage")
+        storage = mock.Mock()
+
+        def export_side_effect(command_name, export_dir, **kwargs):
+            self.assertEqual(command_name, "document_exporter")
+            export_path = (
+                Path(export_dir) / "paperless-manual-export-20260327T120000123456Z.zip"
+            )
+            with zipfile.ZipFile(export_path, "w") as zip_file:
+                zip_file.writestr("originals/customer-a/document.pdf", b"test")
+
+        call_command_mock.side_effect = export_side_effect
+
+        with mock.patch(
+            "documents.tasks._get_manual_s3_transfer_storage",
+            return_value=(storage_config, storage),
+        ):
+            tasks.export_documents_to_s3_storage(1)
+
+        call_command_mock.assert_called_once_with(
+            "document_exporter",
+            mock.ANY,
+            zip=True,
+            zip_name="paperless-manual-export-20260327T120000123456Z",
+            use_filename_format=True,
+            use_folder_prefix=True,
+            no_progress_bar=True,
+        )
+        storage.save.assert_called_once()
+
+    @mock.patch("documents.tasks.call_command")
+    def test_import_documents_from_s3_storage_imports_selected_export(
+        self,
+        call_command_mock,
+    ):
+        storage_config = S3StorageConfiguration(name="Backup Storage")
+        storage = mock.Mock()
+        export_name = "paperless-manual-export-20260327T120000Z.zip"
+        storage.exists.return_value = True
+        dummy_zip = self.dirs.scratch_dir / "dummy.zip"
+        with zipfile.ZipFile(dummy_zip, "w") as zip_file:
+            zip_file.writestr("originals/customer-a/document.pdf", b"test")
+
+        storage.open.return_value = dummy_zip.open("rb")
+        self.addCleanup(lambda: dummy_zip.unlink(missing_ok=True))
+
+        with mock.patch(
+            "documents.tasks._get_manual_s3_transfer_storage",
+            return_value=(storage_config, storage),
+        ):
+            tasks.import_documents_from_s3_storage(1, export_name, owner_id=42)
+
+        call_command_mock.assert_called_once_with(
+            "document_importer",
+            mock.ANY,
+            no_progress_bar=True,
+            task_owner_id=42,
+        )
 
 
 class TestEmptyTrashTask(DirectoriesMixin, FileSystemAssertsMixin, TestCase):

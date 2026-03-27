@@ -50,6 +50,7 @@ export enum ConfigOptionType {
 export const ConfigCategory = {
   General: $localize`General Settings`,
   Storage: $localize`Storage Settings`,
+  Backup: $localize`Backup Settings`,
   OCR: $localize`OCR Settings`,
   Barcode: $localize`Barcode Settings`,
 }
@@ -212,7 +213,7 @@ export const PaperlessConfigOptions: ConfigOption[] = [
     type: ConfigOptionType.Select,
     choices: [],
     config_key: 'PAPERLESS_DOCUMENTS_BACKUP_S3_STORAGE',
-    category: ConfigCategory.Storage,
+    category: ConfigCategory.Backup,
   },
   {
     key: 'barcodes_enabled',

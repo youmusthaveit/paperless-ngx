@@ -994,6 +994,70 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(task.status, states.PENDING)
         self.assertEqual(task.task_file_name, storage.name)
 
+    @mock.patch(
+        "paperless.views.build_manual_s3_export_filename",
+        return_value="paperless-manual-export-20260327T120000Z.zip",
+    )
+    @mock.patch("paperless.views.call_command")
+    def test_api_download_manual_export(self, call_command_mock, _filename_mock):
+        def create_export(command_name, export_dir, **kwargs):
+            self.assertEqual(command_name, "document_exporter")
+            export_path = (
+                Path(export_dir) / "paperless-manual-export-20260327T120000Z.zip"
+            )
+            export_path.write_bytes(b"zip-content")
+
+        call_command_mock.side_effect = create_export
+
+        config = ApplicationConfiguration.objects.first()
+        response = self.client.post(
+            f"/api/config/{config.pk}/download-export/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-manual-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")
+
+    def test_api_delete_named_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+
+        with mock.patch(
+            "paperless.views.get_s3_configuration_storage",
+            return_value=storage_backend,
+        ):
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/delete-export/",
+                json.dumps(
+                    {
+                        "export_name": "paperless-manual-export-20260327T120000Z.zip",
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["detail"],
+            'Successfully deleted export "paperless-manual-export-20260327T120000Z.zip".',
+        )
+        storage_backend.delete.assert_called_once_with(
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+
     @mock.patch("paperless.views.import_documents_from_s3_storage.delay")
     def test_api_import_named_s3_storage(self, import_delay_mock):
         task_id = str(uuid.uuid4())
@@ -1022,6 +1086,24 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(task.task_name, PaperlessTask.TaskName.IMPORT_S3_STORAGE)
         self.assertEqual(task.status, states.PENDING)
         self.assertEqual(task.task_file_name, storage.name)
+
+    def test_api_delete_named_s3_export_requires_export_name(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/delete-export/",
+            json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_import_named_s3_storage_requires_export_name(self):
         storage = S3StorageConfiguration.objects.create(
@@ -1076,3 +1158,38 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             "paperless-manual-export-20260327T120000Z.zip",
         )
         self.assertEqual(response.data[0]["size"], 456)
+
+    def test_api_download_named_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+        storage_backend.open.return_value = BytesIO(b"zip-content")
+
+        with mock.patch(
+            "paperless.views.get_s3_configuration_storage",
+            return_value=storage_backend,
+        ):
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/download-export/",
+                json.dumps(
+                    {
+                        "export_name": "paperless-manual-export-20260327T120000Z.zip",
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-manual-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")
