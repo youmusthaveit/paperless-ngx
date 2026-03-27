@@ -15,6 +15,7 @@ from rest_framework import serializers
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 
 from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.validators import reject_dangerous_svg
 from paperless_mail.serialisers import ObfuscatedPasswordField
 
@@ -211,6 +212,11 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
         allow_null=True,
         allow_blank=True,
     )
+    documents_backup_s3_secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
 
     def run_validation(self, data):
         # Empty strings treated as None to avoid unexpected behavior
@@ -231,6 +237,16 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
             "documents_s3_custom_domain",
             "documents_s3_url_protocol",
             "documents_s3_addressing_style",
+            "documents_backup_prefix",
+            "documents_backup_s3_bucket",
+            "documents_backup_s3_endpoint_url",
+            "documents_backup_s3_access_key_id",
+            "documents_backup_s3_secret_access_key",
+            "documents_backup_s3_region_name",
+            "documents_backup_s3_default_acl",
+            "documents_backup_s3_custom_domain",
+            "documents_backup_s3_url_protocol",
+            "documents_backup_s3_addressing_style",
         )
         for field in nullable_string_fields:
             if field in data and data[field] == "":
@@ -246,6 +262,13 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
             and validated_data["documents_s3_secret_access_key"].replace("*", "") == ""
         ):
             validated_data.pop("documents_s3_secret_access_key")
+        if (
+            "documents_backup_s3_secret_access_key" in validated_data
+            and validated_data["documents_backup_s3_secret_access_key"]
+            and validated_data["documents_backup_s3_secret_access_key"].replace("*", "")
+            == ""
+        ):
+            validated_data.pop("documents_backup_s3_secret_access_key")
         return super().update(instance, validated_data)
 
     def validate_app_logo(self, file: UploadedFile):
@@ -255,4 +278,42 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ApplicationConfiguration
+        fields = "__all__"
+
+
+class S3StorageConfigurationSerializer(serializers.ModelSerializer):
+    secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    def run_validation(self, data):
+        nullable_string_fields = (
+            "prefix",
+            "endpoint_url",
+            "access_key_id",
+            "secret_access_key",
+            "region_name",
+            "default_acl",
+            "custom_domain",
+            "url_protocol",
+            "addressing_style",
+        )
+        for field in nullable_string_fields:
+            if field in data and data[field] == "":
+                data[field] = None
+        return super().run_validation(data)
+
+    def update(self, instance, validated_data):
+        if (
+            "secret_access_key" in validated_data
+            and validated_data["secret_access_key"]
+            and validated_data["secret_access_key"].replace("*", "") == ""
+        ):
+            validated_data.pop("secret_access_key")
+        return super().update(instance, validated_data)
+
+    class Meta:
+        model = S3StorageConfiguration
         fields = "__all__"

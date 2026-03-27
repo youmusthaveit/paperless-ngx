@@ -11,6 +11,7 @@ from rest_framework.test import APITestCase
 from documents.tests.utils import DirectoriesMixin
 from paperless.models import ApplicationConfiguration
 from paperless.models import ColorConvertChoices
+from paperless.models import S3StorageConfiguration
 
 
 class TestApiAppConfig(DirectoriesMixin, APITestCase):
@@ -58,6 +59,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "app_logo": None,
                 "documents_storage_type": None,
                 "documents_storage_prefix": None,
+                "documents_s3_storage": None,
                 "documents_s3_bucket": None,
                 "documents_s3_endpoint_url": None,
                 "documents_s3_access_key_id": None,
@@ -69,6 +71,19 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "documents_s3_addressing_style": None,
                 "documents_s3_querystring_auth": None,
                 "documents_s3_use_ssl": None,
+                "documents_backup_prefix": None,
+                "documents_backup_s3_storage": None,
+                "documents_backup_s3_bucket": None,
+                "documents_backup_s3_endpoint_url": None,
+                "documents_backup_s3_access_key_id": None,
+                "documents_backup_s3_secret_access_key": None,
+                "documents_backup_s3_region_name": None,
+                "documents_backup_s3_default_acl": None,
+                "documents_backup_s3_custom_domain": None,
+                "documents_backup_s3_url_protocol": None,
+                "documents_backup_s3_addressing_style": None,
+                "documents_backup_s3_querystring_auth": None,
+                "documents_backup_s3_use_ssl": None,
                 "barcodes_enabled": None,
                 "barcode_enable_tiff_support": None,
                 "barcode_string": None,
@@ -130,12 +145,18 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(config.color_conversion_strategy, ColorConvertChoices.RGB)
 
     def test_api_update_document_storage_config(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Primary",
+            prefix="tenant-a/documents",
+            bucket="selected-primary",
+        )
         response = self.client.patch(
             f"{self.ENDPOINT}1/",
             json.dumps(
                 {
                     "documents_storage_type": "s3",
                     "documents_storage_prefix": "tenant-a/documents",
+                    "documents_s3_storage": selected_storage.pk,
                     "documents_s3_bucket": "paperless-test",
                     "documents_s3_access_key_id": "access-key",
                     "documents_s3_secret_access_key": "secret-key",
@@ -150,6 +171,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         config = ApplicationConfiguration.objects.first()
         self.assertEqual(config.documents_storage_type, "s3")
         self.assertEqual(config.documents_storage_prefix, "tenant-a/documents")
+        self.assertEqual(config.documents_s3_storage, selected_storage)
         self.assertEqual(config.documents_s3_bucket, "paperless-test")
         self.assertEqual(config.documents_s3_access_key_id, "access-key")
         self.assertEqual(config.documents_s3_secret_access_key, "secret-key")
@@ -181,13 +203,85 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         config.refresh_from_db()
         self.assertEqual(config.documents_s3_secret_access_key, "keep-me")
 
+    def test_api_update_document_backup_config(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Backup",
+            prefix="paperless/backup",
+            bucket="selected-backup",
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_prefix": "paperless/backup",
+                    "documents_backup_s3_storage": selected_storage.pk,
+                    "documents_backup_s3_bucket": "paperless-backup",
+                    "documents_backup_s3_access_key_id": "backup-access-key",
+                    "documents_backup_s3_secret_access_key": "backup-secret-key",
+                    "documents_backup_s3_querystring_auth": False,
+                    "documents_backup_s3_use_ssl": True,
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(config.documents_backup_prefix, "paperless/backup")
+        self.assertEqual(config.documents_backup_s3_storage, selected_storage)
+        self.assertEqual(config.documents_backup_s3_bucket, "paperless-backup")
+        self.assertEqual(
+            config.documents_backup_s3_access_key_id,
+            "backup-access-key",
+        )
+        self.assertEqual(
+            config.documents_backup_s3_secret_access_key,
+            "backup-secret-key",
+        )
+        self.assertEqual(config.documents_backup_s3_querystring_auth, False)
+        self.assertEqual(config.documents_backup_s3_use_ssl, True)
+
+        response = self.client.get(self.ENDPOINT, format="json")
+        self.assertNotEqual(
+            response.data[0]["documents_backup_s3_secret_access_key"],
+            "backup-secret-key",
+        )
+
+    def test_api_update_document_backup_secret_keeps_existing_masked_value(self):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_backup_s3_secret_access_key = "keep-backup-secret"
+        config.save()
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config.refresh_from_db()
+        self.assertEqual(
+            config.documents_backup_s3_secret_access_key,
+            "keep-backup-secret",
+        )
+
     @mock.patch("paperless.views.test_document_storage_connection")
     def test_api_test_s3_storage(self, test_storage_mock):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Primary",
+            prefix="tenant-a/documents",
+            bucket="selected-primary",
+        )
         response = self.client.post(
             f"{self.ENDPOINT}1/test-s3-storage/",
             json.dumps(
                 {
                     "documents_storage_type": "s3",
+                    "documents_s3_storage": selected_storage.pk,
                     "documents_s3_bucket": "paperless-test",
                     "documents_s3_secret_access_key": "secret-key",
                 },
@@ -198,6 +292,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         test_storage_mock.assert_called_once_with(
             {
                 "documents_storage_type": "s3",
+                "documents_s3_storage": selected_storage,
                 "documents_s3_bucket": "paperless-test",
                 "documents_s3_secret_access_key": "secret-key",
             },
@@ -224,6 +319,58 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
             {
                 "documents_storage_type": "s3",
                 "documents_s3_secret_access_key": "keep-me",
+            },
+        )
+
+    @mock.patch("paperless.views.test_document_backup_storage_connection")
+    def test_api_test_s3_backup_storage(self, test_storage_mock):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Backup",
+            prefix="paperless/backup",
+            bucket="selected-backup",
+        )
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-backup-storage/",
+            json.dumps(
+                {
+                    "documents_backup_s3_storage": selected_storage.pk,
+                    "documents_backup_s3_bucket": "paperless-backup",
+                    "documents_backup_s3_secret_access_key": "backup-secret-key",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_backup_s3_storage": selected_storage,
+                "documents_backup_s3_bucket": "paperless-backup",
+                "documents_backup_s3_secret_access_key": "backup-secret-key",
+            },
+        )
+
+    @mock.patch("paperless.views.test_document_backup_storage_connection")
+    def test_api_test_s3_backup_storage_uses_existing_masked_secret(
+        self,
+        test_storage_mock,
+    ):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_backup_s3_secret_access_key = "keep-backup-secret"
+        config.save()
+
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-backup-storage/",
+            json.dumps(
+                {
+                    "documents_backup_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_backup_s3_secret_access_key": "keep-backup-secret",
             },
         )
 
@@ -723,3 +870,98 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         self.assertEqual(ApplicationConfiguration.objects.count(), 1)
+
+
+class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
+    ENDPOINT = "/api/s3_storages/"
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        user = User.objects.create_superuser(username="temp_admin_storage")
+        self.client.force_authenticate(user=user)
+
+    def test_api_create_s3_storage(self):
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "Primary storage",
+                    "prefix": "documents",
+                    "bucket": "paperless-primary",
+                    "endpoint_url": "https://s3.example.com",
+                    "access_key_id": "access-key",
+                    "secret_access_key": "secret-key",
+                    "querystring_auth": True,
+                    "use_ssl": False,
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        storage = S3StorageConfiguration.objects.get(name="Primary storage")
+        self.assertEqual(storage.prefix, "documents")
+        self.assertEqual(storage.bucket, "paperless-primary")
+        self.assertEqual(storage.secret_access_key, "secret-key")
+
+        list_response = self.client.get(self.ENDPOINT, format="json")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(list_response.data[0]["secret_access_key"], "secret-key")
+
+    def test_api_create_s3_storage_with_optional_prefix(self):
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "No prefix storage",
+                    "prefix": "",
+                    "bucket": "paperless-primary",
+                    "endpoint_url": "https://s3.example.com",
+                    "access_key_id": "access-key",
+                    "secret_access_key": "secret-key",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        storage = S3StorageConfiguration.objects.get(name="No prefix storage")
+        self.assertIsNone(storage.prefix)
+
+    @mock.patch("paperless.views.test_s3_connection")
+    def test_api_test_named_s3_storage(self, test_s3_connection_mock):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/test-connection/",
+            json.dumps(
+                {
+                    "secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_s3_connection_mock.assert_called_once_with(
+            prefix="backup",
+            s3_bucket="paperless-backup",
+            s3_endpoint_url="https://s3.example.com",
+            s3_access_key_id="backup-access",
+            s3_secret_access_key="backup-secret",
+            s3_region_name=None,
+            s3_default_acl=None,
+            s3_custom_domain=None,
+            s3_url_protocol="https:",
+            s3_addressing_style=None,
+            s3_querystring_auth=False,
+            s3_use_ssl=True,
+        )

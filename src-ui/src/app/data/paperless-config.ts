@@ -63,12 +63,14 @@ export interface ConfigOption {
   key: string
   title: string
   type: ConfigOptionType
-  choices?: Array<{ id: string; name: string }>
+  choices?: Array<{ id: string | number; name: string }>
   config_key?: string
   category: string
 }
 
-function mapToItems(enumObj: Object): Array<{ id: string; name: string }> {
+function mapToItems(
+  enumObj: Object
+): Array<{ id: string | number; name: string }> {
   return Object.keys(enumObj).map((key) => {
     return {
       id: enumObj[key],
@@ -197,87 +199,19 @@ export const PaperlessConfigOptions: ConfigOption[] = [
     category: ConfigCategory.Storage,
   },
   {
-    key: 'documents_storage_prefix',
-    title: $localize`Document Storage Prefix`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_STORAGE_PREFIX',
+    key: 'documents_s3_storage',
+    title: $localize`Primary S3 Storage`,
+    type: ConfigOptionType.Select,
+    choices: [],
+    config_key: 'PAPERLESS_DOCUMENTS_S3_STORAGE',
     category: ConfigCategory.Storage,
   },
   {
-    key: 'documents_s3_bucket',
-    title: $localize`S3 Bucket`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_BUCKET',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_endpoint_url',
-    title: $localize`S3 Endpoint URL`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_ENDPOINT_URL',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_access_key_id',
-    title: $localize`S3 Access Key ID`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_ACCESS_KEY_ID',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_secret_access_key',
-    title: $localize`S3 Secret Access Key`,
-    type: ConfigOptionType.Password,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_SECRET_ACCESS_KEY',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_region_name',
-    title: $localize`S3 Region`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_REGION_NAME',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_default_acl',
-    title: $localize`S3 Default ACL`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_DEFAULT_ACL',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_custom_domain',
-    title: $localize`S3 Custom Domain`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_CUSTOM_DOMAIN',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_url_protocol',
-    title: $localize`S3 URL Protocol`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_URL_PROTOCOL',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_addressing_style',
-    title: $localize`S3 Addressing Style`,
-    type: ConfigOptionType.String,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_ADDRESSING_STYLE',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_querystring_auth',
-    title: $localize`S3 Querystring Auth`,
-    type: ConfigOptionType.Boolean,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_QUERYSTRING_AUTH',
-    category: ConfigCategory.Storage,
-  },
-  {
-    key: 'documents_s3_use_ssl',
-    title: $localize`S3 Use SSL`,
-    type: ConfigOptionType.Boolean,
-    config_key: 'PAPERLESS_DOCUMENTS_S3_USE_SSL',
+    key: 'documents_backup_s3_storage',
+    title: $localize`Backup S3 Storage`,
+    type: ConfigOptionType.Select,
+    choices: [],
+    config_key: 'PAPERLESS_DOCUMENTS_BACKUP_S3_STORAGE',
     category: ConfigCategory.Storage,
   },
   {
@@ -377,6 +311,7 @@ export interface PaperlessConfig extends ObjectWithId {
   app_title: string
   documents_storage_type: DocumentStorageTypeConfig
   documents_storage_prefix: string
+  documents_s3_storage: number
   documents_s3_bucket: string
   documents_s3_endpoint_url: string
   documents_s3_access_key_id: string
@@ -388,6 +323,19 @@ export interface PaperlessConfig extends ObjectWithId {
   documents_s3_addressing_style: string
   documents_s3_querystring_auth: boolean
   documents_s3_use_ssl: boolean
+  documents_backup_prefix: string
+  documents_backup_s3_storage: number
+  documents_backup_s3_bucket: string
+  documents_backup_s3_endpoint_url: string
+  documents_backup_s3_access_key_id: string
+  documents_backup_s3_secret_access_key: string
+  documents_backup_s3_region_name: string
+  documents_backup_s3_default_acl: string
+  documents_backup_s3_custom_domain: string
+  documents_backup_s3_url_protocol: string
+  documents_backup_s3_addressing_style: string
+  documents_backup_s3_querystring_auth: boolean
+  documents_backup_s3_use_ssl: boolean
   barcodes_enabled: boolean
   barcode_enable_tiff_support: boolean
   barcode_string: string

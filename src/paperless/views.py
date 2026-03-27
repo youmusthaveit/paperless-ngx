@@ -38,14 +38,18 @@ from rest_framework.viewsets import ModelViewSet
 
 from documents.index import DelayedQuery
 from documents.permissions import PaperlessObjectPermissions
+from documents.storage import test_document_backup_storage_connection
 from documents.storage import test_document_storage_connection
+from documents.storage import test_s3_connection
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.serialisers import ApplicationConfigurationSerializer
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import PaperlessAuthTokenSerializer
 from paperless.serialisers import ProfileSerializer
+from paperless.serialisers import S3StorageConfigurationSerializer
 from paperless.serialisers import UserSerializer
 
 
@@ -219,6 +223,66 @@ class GroupViewSet(ModelViewSet):
     filter_backends = (DjangoFilterBackend, OrderingFilter)
     filterset_class = GroupFilterSet
     ordering_fields = ("name",)
+
+
+class S3StorageConfigurationViewSet(ModelViewSet):
+    model = S3StorageConfiguration
+
+    queryset = S3StorageConfiguration.objects.order_by(Lower("name"))
+
+    serializer_class = S3StorageConfigurationSerializer
+    permission_classes = (IsAuthenticated, DjangoModelPermissions)
+    pagination_class = None
+    ordering_fields = ("name",)
+
+    @action(detail=True, methods=["post"], url_path="test-connection")
+    def test_connection(self, request, pk=None):
+        storage = self.get_object()
+        serializer = self.get_serializer(storage, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        payload = dict(serializer.validated_data)
+        secret = payload.get("secret_access_key")
+        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
+            payload["secret_access_key"] = storage.secret_access_key
+
+        try:
+            test_s3_connection(
+                prefix=payload.get("prefix", storage.prefix),
+                s3_bucket=payload.get("bucket", storage.bucket),
+                s3_endpoint_url=payload.get("endpoint_url", storage.endpoint_url),
+                s3_access_key_id=payload.get("access_key_id", storage.access_key_id),
+                s3_secret_access_key=payload.get(
+                    "secret_access_key",
+                    storage.secret_access_key,
+                ),
+                s3_region_name=payload.get("region_name", storage.region_name),
+                s3_default_acl=payload.get("default_acl", storage.default_acl),
+                s3_custom_domain=payload.get("custom_domain", storage.custom_domain),
+                s3_url_protocol=payload.get("url_protocol", storage.url_protocol)
+                or "https:",
+                s3_addressing_style=payload.get(
+                    "addressing_style",
+                    storage.addressing_style,
+                ),
+                s3_querystring_auth=payload.get(
+                    "querystring_auth",
+                    storage.querystring_auth,
+                )
+                if payload.get("querystring_auth", storage.querystring_auth) is not None
+                else False,
+                s3_use_ssl=payload.get("use_ssl", storage.use_ssl)
+                if payload.get("use_ssl", storage.use_ssl) is not None
+                else True,
+            )
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 storage test succeeded."})
 
 
 class ProfileView(GenericAPIView):
@@ -401,6 +465,17 @@ class ApplicationConfigurationViewSet(ModelViewSet):
     def create(self, request, *args, **kwargs):
         return Response(status=405)  # Not Allowed
 
+    @staticmethod
+    def _restore_masked_secret(
+        *,
+        overrides: dict[str, object],
+        config: ApplicationConfiguration,
+        key: str,
+    ) -> None:
+        secret = overrides.get(key)
+        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
+            overrides[key] = getattr(config, key)
+
     @action(detail=True, methods=["post"], url_path="test-s3-storage")
     def test_s3_storage(self, request, *args, **kwargs):
         config = self.get_object()
@@ -410,14 +485,14 @@ class ApplicationConfigurationViewSet(ModelViewSet):
         overrides = {
             key: value
             for key, value in serializer.validated_data.items()
-            if key.startswith("documents_")
+            if key.startswith("documents_") and not key.startswith("documents_backup_")
         }
 
-        secret = overrides.get("documents_s3_secret_access_key")
-        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
-            overrides["documents_s3_secret_access_key"] = (
-                config.documents_s3_secret_access_key
-            )
+        self._restore_masked_secret(
+            overrides=overrides,
+            config=config,
+            key="documents_s3_secret_access_key",
+        )
 
         try:
             test_document_storage_connection(overrides)
@@ -429,6 +504,35 @@ class ApplicationConfigurationViewSet(ModelViewSet):
             ) from exc
 
         return Response({"detail": "S3 storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="test-s3-backup-storage")
+    def test_s3_backup_storage(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = self.get_serializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        overrides = {
+            key: value
+            for key, value in serializer.validated_data.items()
+            if key.startswith("documents_backup_")
+        }
+
+        self._restore_masked_secret(
+            overrides=overrides,
+            config=config,
+            key="documents_backup_s3_secret_access_key",
+        )
+
+        try:
+            test_document_backup_storage_connection(overrides)
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 backup storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 backup storage test succeeded."})
 
 
 @extend_schema_view(
