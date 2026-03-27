@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import logging
+import shutil
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +12,8 @@ from celery import shared_task
 from celery import states
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.core.files import File
+from django.core.management import call_command
 from django.db import models
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -52,11 +55,21 @@ from documents.signals import document_updated
 from documents.signals.handlers import cleanup_document_deletion
 from documents.signals.handlers import run_workflows
 from documents.storage import document_write_from_path
+from documents.storage import get_s3_configuration_storage
 from documents.workflows.utils import get_workflows_for_trigger
+from paperless.models import S3StorageConfiguration
 
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
 logger = logging.getLogger("paperless.tasks")
+
+MANUAL_S3_TRANSFER_LOCATION = "manual-transfer"
+MANUAL_S3_EXPORT_FILENAME_PREFIX = "paperless-manual-export"
+
+
+def build_manual_s3_export_filename() -> str:
+    timestamp = timezone.now().strftime("%Y%m%dT%H%M%SZ")
+    return f"{MANUAL_S3_EXPORT_FILENAME_PREFIX}-{timestamp}.zip"
 
 
 @shared_task
@@ -220,6 +233,76 @@ def sanity_check(*, scheduled=True, raise_on_error=True):
         return "Sanity check exited with infos. See log."
     else:
         return "No issues detected."
+
+
+def _get_manual_s3_transfer_storage(storage_id: int):
+    storage_config = S3StorageConfiguration.objects.get(pk=storage_id)
+    storage = get_s3_configuration_storage(
+        storage_config,
+        location=MANUAL_S3_TRANSFER_LOCATION,
+    )
+    return storage_config, storage
+
+
+@shared_task
+def export_documents_to_s3_storage(storage_id: int):
+    storage_config, storage = _get_manual_s3_transfer_storage(storage_id)
+    export_filename = build_manual_s3_export_filename()
+
+    settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=settings.SCRATCH_DIR,
+        prefix="paperless-s3-export-",
+    ) as temp_dir:
+        call_command(
+            "document_exporter",
+            temp_dir,
+            zip=True,
+            zip_name=export_filename.removesuffix(".zip"),
+            no_progress_bar=True,
+        )
+        export_path = Path(temp_dir) / export_filename
+        with export_path.open("rb") as handle:
+            storage.save(export_filename, File(handle, name=export_path.name))
+
+    return (
+        f'Successfully exported documents to S3 storage "{storage_config.name}" '
+        f"as {export_filename}."
+    )
+
+
+@shared_task
+def import_documents_from_s3_storage(storage_id: int, export_name: str):
+    storage_config, storage = _get_manual_s3_transfer_storage(storage_id)
+
+    if not storage.exists(export_name):
+        raise FileNotFoundError(
+            f'No export snapshot "{export_name}" found in S3 storage '
+            f'"{storage_config.name}".',
+        )
+
+    settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=settings.SCRATCH_DIR,
+        prefix="paperless-s3-import-",
+    ) as temp_dir:
+        import_path = Path(temp_dir) / export_name
+        with (
+            storage.open(export_name, "rb") as source_handle,
+            import_path.open("wb") as target_handle,
+        ):
+            shutil.copyfileobj(source_handle, target_handle)
+
+        call_command(
+            "document_importer",
+            import_path,
+            no_progress_bar=True,
+        )
+
+    return (
+        f'Successfully imported documents from S3 storage "{storage_config.name}" '
+        f"using {export_name}."
+    )
 
 
 @shared_task

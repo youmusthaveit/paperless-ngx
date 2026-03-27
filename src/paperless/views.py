@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from pathlib import Path
+from uuid import uuid4
 
 from allauth.mfa import signals
 from allauth.mfa.adapter import get_adapter as get_mfa_adapter
@@ -9,6 +10,7 @@ from allauth.mfa.recovery_codes.internal.flows import auto_generate_recovery_cod
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.models import SocialAccount
+from celery import states
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
@@ -37,10 +39,14 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from documents.index import DelayedQuery
+from documents.models import PaperlessTask
 from documents.permissions import PaperlessObjectPermissions
+from documents.storage import get_s3_configuration_storage
 from documents.storage import test_document_backup_storage_connection
 from documents.storage import test_document_storage_connection
 from documents.storage import test_s3_connection
+from documents.tasks import export_documents_to_s3_storage
+from documents.tasks import import_documents_from_s3_storage
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
@@ -283,6 +289,95 @@ class S3StorageConfigurationViewSet(ModelViewSet):
             ) from exc
 
         return Response({"detail": "S3 storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="export")
+    def export_to_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        async_result = export_documents_to_s3_storage.delay(storage.pk)
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=async_result.id or str(uuid4()),
+            status=states.PENDING,
+            task_file_name=storage.name,
+            task_name=PaperlessTask.TaskName.EXPORT_S3_STORAGE,
+            result=None,
+            owner=request.user,
+        )
+        return Response(
+            {
+                "detail": (
+                    f'Started export to S3 storage "{storage.name}" in the background.'
+                ),
+                "task_id": async_result.id,
+            },
+            status=202,
+        )
+
+    @action(detail=True, methods=["get"], url_path="exports")
+    def list_exports(self, request, pk=None):
+        storage = self.get_object()
+        storage_backend = get_s3_configuration_storage(
+            storage,
+            location="manual-transfer",
+        )
+        try:
+            _, filenames = storage_backend.listdir("")
+            exports = []
+            for filename in sorted(filenames, reverse=True):
+                if not filename.endswith(".zip"):
+                    continue
+                exports.append(
+                    {
+                        "name": filename,
+                        "size": storage_backend.size(filename),
+                        "modified": storage_backend.get_modified_time(filename),
+                    },
+                )
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to list exports for "{storage.name}": {exc}'},
+            ) from exc
+
+        return Response(exports)
+
+    @action(detail=True, methods=["post"], url_path="import")
+    def import_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = request.data.get("export_name")
+        if not isinstance(export_name, str) or not export_name:
+            raise ValidationError({"export_name": "This field is required."})
+        if Path(export_name).name != export_name or not export_name.endswith(".zip"):
+            raise ValidationError({"export_name": "Invalid export name."})
+
+        async_result = import_documents_from_s3_storage.delay(
+            storage.pk,
+            export_name,
+        )
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=async_result.id or str(uuid4()),
+            status=states.PENDING,
+            task_file_name=storage.name,
+            task_name=PaperlessTask.TaskName.IMPORT_S3_STORAGE,
+            result=None,
+            owner=request.user,
+        )
+        return Response(
+            {
+                "detail": (
+                    f'Started import from S3 storage "{storage.name}" '
+                    f'using "{export_name}" in the background.'
+                ),
+                "task_id": async_result.id,
+            },
+            status=202,
+        )
 
 
 class ProfileView(GenericAPIView):

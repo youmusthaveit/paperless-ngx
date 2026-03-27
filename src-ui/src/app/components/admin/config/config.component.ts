@@ -25,7 +25,7 @@ import {
   PaperlessConfig,
   PaperlessConfigOptions,
 } from 'src/app/data/paperless-config'
-import { S3Storage } from 'src/app/data/s3-storage'
+import { S3Storage, S3StorageExport } from 'src/app/data/s3-storage'
 import { ConfigService } from 'src/app/services/config.service'
 import { SettingsService } from 'src/app/services/settings.service'
 import { ToastService } from 'src/app/services/toast.service'
@@ -71,8 +71,12 @@ export class ConfigComponent
 
   public errors = {}
   public testingStorage = false
+  public runningS3Transfer = false
   public savingS3Storage = false
   public s3Storages: S3Storage[] = []
+  public expandedExportsStorageId: number | null = null
+  public loadingExportsStorageId: number | null = null
+  public s3StorageExports: Record<number, S3StorageExport[]> = {}
   public s3StorageSelectItems: Array<{ id: number; name: string }> = []
   public s3StorageForm = new FormGroup({
     id: new FormControl<number | null>(null),
@@ -293,6 +297,18 @@ export class ConfigComponent
     )
   }
 
+  public copyS3Storage(storage: S3Storage) {
+    this.editS3Storage({
+      ...storage,
+      id: null,
+      name: `${storage.name} (Copy)`,
+      secret_access_key: null,
+    })
+    this.toastService.showInfo(
+      $localize`S3 storage copied into the form. Please enter the secret access key before saving.`
+    )
+  }
+
   public saveS3Storage() {
     this.savingS3Storage = true
     this.configService
@@ -388,6 +404,104 @@ export class ConfigComponent
           )
         },
       })
+  }
+
+  public exportNamedS3Storage(storage: S3Storage) {
+    if (
+      !window.confirm(
+        $localize`Export all documents manually to the S3 storage "${storage.name}"?`
+      )
+    ) {
+      return
+    }
+
+    this.runningS3Transfer = true
+    this.configService
+      .exportToS3Storage(storage)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.runningS3Transfer = false
+          this.loadS3StorageExports(storage, true)
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.runningS3Transfer = false
+          this.toastService.showError(
+            $localize`An error occurred starting the S3 export`,
+            e
+          )
+        },
+      })
+  }
+
+  public importNamedS3Storage(storage: S3Storage, exportName: string) {
+    if (
+      !window.confirm(
+        $localize`Import the export "${exportName}" from the S3 storage "${storage.name}"?`
+      )
+    ) {
+      return
+    }
+
+    this.runningS3Transfer = true
+    this.configService
+      .importFromS3Storage(storage, exportName)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.runningS3Transfer = false
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.runningS3Transfer = false
+          this.toastService.showError(
+            $localize`An error occurred starting the S3 import`,
+            e
+          )
+        },
+      })
+  }
+
+  public toggleS3StorageExports(storage: S3Storage) {
+    if (this.expandedExportsStorageId === storage.id) {
+      this.expandedExportsStorageId = null
+      return
+    }
+
+    this.expandedExportsStorageId = storage.id
+    this.loadS3StorageExports(storage)
+  }
+
+  public loadS3StorageExports(
+    storage: S3Storage,
+    forceRefresh: boolean = false
+  ) {
+    if (!forceRefresh && this.s3StorageExports[storage.id]) {
+      return
+    }
+
+    this.loadingExportsStorageId = storage.id
+    this.configService
+      .getS3StorageExports(storage.id)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (exports) => {
+          this.loadingExportsStorageId = null
+          this.s3StorageExports[storage.id] = exports
+        },
+        error: (e) => {
+          this.loadingExportsStorageId = null
+          this.toastService.showError(
+            $localize`An error occurred loading S3 exports`,
+            e
+          )
+        },
+      })
+  }
+
+  public formatS3ExportDate(value: string): string {
+    return new Date(value).toLocaleString()
   }
 
   public testS3Storage() {

@@ -699,6 +699,8 @@ class PaperlessTask(ModelWithOwner):
         TRAIN_CLASSIFIER = ("train_classifier", _("Train Classifier"))
         CHECK_SANITY = ("check_sanity", _("Check Sanity"))
         INDEX_OPTIMIZE = ("index_optimize", _("Index Optimize"))
+        EXPORT_S3_STORAGE = ("export_s3_storage", _("Export S3 Storage"))
+        IMPORT_S3_STORAGE = ("import_s3_storage", _("Import S3 Storage"))
 
     task_id = models.CharField(
         max_length=255,

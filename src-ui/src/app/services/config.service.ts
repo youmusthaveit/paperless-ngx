@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core'
 import { Observable, first, map } from 'rxjs'
 import { environment } from 'src/environments/environment'
 import { PaperlessConfig } from '../data/paperless-config'
-import { S3Storage } from '../data/s3-storage'
+import { S3Storage, S3StorageExport } from '../data/s3-storage'
 
 @Injectable({
   providedIn: 'root',
@@ -129,6 +129,37 @@ export class ConfigService {
       .post<{
         detail: string
       }>(`${this.s3StorageUrl}${storage.id}/test-connection/`, storage)
+      .pipe(first())
+  }
+
+  exportToS3Storage(
+    storage: Partial<S3Storage>
+  ): Observable<{ detail: string; task_id: string }> {
+    return this.http
+      .post<{
+        detail: string
+        task_id: string
+      }>(`${this.s3StorageUrl}${storage.id}/export/`, {})
+      .pipe(first())
+  }
+
+  importFromS3Storage(
+    storage: Partial<S3Storage>,
+    exportName: string
+  ): Observable<{ detail: string; task_id: string }> {
+    return this.http
+      .post<{
+        detail: string
+        task_id: string
+      }>(`${this.s3StorageUrl}${storage.id}/import/`, {
+        export_name: exportName,
+      })
+      .pipe(first())
+  }
+
+  getS3StorageExports(storageId: number): Observable<S3StorageExport[]> {
+    return this.http
+      .get<S3StorageExport[]>(`${this.s3StorageUrl}${storageId}/exports/`)
       .pipe(first())
   }
 }

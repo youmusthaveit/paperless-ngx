@@ -1,5 +1,11 @@
 import { ObjectWithId } from './object-with-id'
 
+export interface S3StorageExport {
+  name: string
+  size: number
+  modified: string
+}
+
 export interface S3Storage extends ObjectWithId {
   name: string
   prefix: string

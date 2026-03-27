@@ -75,10 +75,53 @@
                                                                     <td>{{storage.bucket}}</td>
                                                                     <td>{{storage.endpoint_url || 'Default'}}</td>
                                                                     <td class="text-end">
+                                                                        <button type="button" class="btn btn-sm btn-link" (click)="toggleS3StorageExports(storage)" i18n>Exports</button>
+                                                                        <button type="button" class="btn btn-sm btn-link" (click)="copyS3Storage(storage)" i18n>Copy</button>
+                                                                        <button type="button" class="btn btn-sm btn-link" (click)="exportNamedS3Storage(storage)" [disabled]="runningS3Transfer" i18n>Export</button>
                                                                         <button type="button" class="btn btn-sm btn-link" (click)="editS3Storage(storage)" i18n>Edit</button>
                                                                         <button type="button" class="btn btn-sm btn-link text-danger" (click)="deleteS3Storage(storage)" i18n>Delete</button>
                                                                     </td>
                                                                 </tr>
+                                                                @if (expandedExportsStorageId === storage.id) {
+                                                                    <tr>
+                                                                        <td colspan="4" class="bg-body-tertiary">
+                                                                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                                                                <h6 class="mb-0" i18n>Available Exports</h6>
+                                                                                <button type="button" class="btn btn-sm btn-outline-secondary" (click)="loadS3StorageExports(storage, true)" [disabled]="loadingExportsStorageId === storage.id" i18n>Refresh</button>
+                                                                            </div>
+                                                                            @if (loadingExportsStorageId === storage.id) {
+                                                                                <div class="text-muted small" i18n>Loading exports...</div>
+                                                                            } @else if ((s3StorageExports[storage.id] ?? []).length === 0) {
+                                                                                <div class="text-muted small" i18n>No manual exports found in this S3 storage.</div>
+                                                                            } @else {
+                                                                                <div class="table-responsive">
+                                                                                    <table class="table table-sm align-middle mb-0">
+                                                                                        <thead>
+                                                                                            <tr>
+                                                                                                <th i18n>Export</th>
+                                                                                                <th i18n>Modified</th>
+                                                                                                <th i18n>Size</th>
+                                                                                                <th class="text-end" i18n>Action</th>
+                                                                                            </tr>
+                                                                                        </thead>
+                                                                                        <tbody>
+                                                                                            @for (exportItem of s3StorageExports[storage.id]; track exportItem.name) {
+                                                                                                <tr>
+                                                                                                    <td>{{exportItem.name}}</td>
+                                                                                                    <td>{{formatS3ExportDate(exportItem.modified)}}</td>
+                                                                                                    <td>{{exportItem.size}} B</td>
+                                                                                                    <td class="text-end">
+                                                                                                        <button type="button" class="btn btn-sm btn-link" (click)="importNamedS3Storage(storage, exportItem.name)" [disabled]="runningS3Transfer" i18n>Import</button>
+                                                                                                    </td>
+                                                                                                </tr>
+                                                                                            }
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                </div>
+                                                                            }
+                                                                        </td>
+                                                                    </tr>
+                                                                }
                                                             } @empty {
                                                                 <tr>
                                                                     <td colspan="4" class="text-muted" i18n>No S3 storages configured yet.</td>

@@ -11,6 +11,7 @@ from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
+from typing import cast
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -273,6 +274,35 @@ def test_s3_connection(
             storage.delete(probe_name)
         else:
             storage.exists(probe_name)
+
+
+def get_s3_configuration_storage(
+    storage_config: S3StorageConfiguration,
+    *,
+    location: str,
+) -> Storage:
+    return cast(
+        "Storage",
+        _build_s3_storage(
+            kind=location.strip("/"),
+            prefix=storage_config.prefix or "",
+            s3_bucket=storage_config.bucket,
+            s3_endpoint_url=storage_config.endpoint_url,
+            s3_access_key_id=storage_config.access_key_id,
+            s3_secret_access_key=storage_config.secret_access_key,
+            s3_region_name=storage_config.region_name,
+            s3_default_acl=storage_config.default_acl,
+            s3_custom_domain=storage_config.custom_domain,
+            s3_url_protocol=storage_config.url_protocol or "https:",
+            s3_addressing_style=storage_config.addressing_style,
+            s3_querystring_auth=storage_config.querystring_auth
+            if storage_config.querystring_auth is not None
+            else False,
+            s3_use_ssl=storage_config.use_ssl
+            if storage_config.use_ssl is not None
+            else True,
+        ),
+    )
 
 
 def test_document_backup_storage_connection(

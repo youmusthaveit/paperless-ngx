@@ -1,13 +1,16 @@
 import json
+import uuid
 from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from celery import states
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from documents.models import PaperlessTask
 from documents.tests.utils import DirectoriesMixin
 from paperless.models import ApplicationConfiguration
 from paperless.models import ColorConvertChoices
@@ -965,3 +968,111 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             s3_querystring_auth=False,
             s3_use_ssl=True,
         )
+
+    @mock.patch("paperless.views.export_documents_to_s3_storage.delay")
+    def test_api_export_named_s3_storage(self, export_delay_mock):
+        task_id = str(uuid.uuid4())
+        export_delay_mock.return_value = mock.Mock(id=task_id)
+        storage = S3StorageConfiguration.objects.create(
+            name="Primary storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/export/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        export_delay_mock.assert_called_once_with(storage.pk)
+        task = PaperlessTask.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, PaperlessTask.TaskName.EXPORT_S3_STORAGE)
+        self.assertEqual(task.status, states.PENDING)
+        self.assertEqual(task.task_file_name, storage.name)
+
+    @mock.patch("paperless.views.import_documents_from_s3_storage.delay")
+    def test_api_import_named_s3_storage(self, import_delay_mock):
+        task_id = str(uuid.uuid4())
+        import_delay_mock.return_value = mock.Mock(id=task_id)
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/import/",
+            json.dumps({"export_name": "paperless-manual-export-20260327T120000Z.zip"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        import_delay_mock.assert_called_once_with(
+            storage.pk,
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        task = PaperlessTask.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, PaperlessTask.TaskName.IMPORT_S3_STORAGE)
+        self.assertEqual(task.status, states.PENDING)
+        self.assertEqual(task.task_file_name, storage.name)
+
+    def test_api_import_named_s3_storage_requires_export_name(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/import/",
+            json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_api_list_named_s3_exports(self):
+        modified = "2026-03-27T12:34:56Z"
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.listdir.return_value = (
+            [],
+            [
+                "paperless-manual-export-20260327T120000Z.zip",
+                "ignore.txt",
+                "paperless-manual-export-20260326T120000Z.zip",
+            ],
+        )
+        storage_backend.size.side_effect = [456, 123]
+        storage_backend.get_modified_time.side_effect = [modified, modified]
+
+        with mock.patch(
+            "paperless.views.get_s3_configuration_storage",
+            return_value=storage_backend,
+        ):
+            response = self.client.get(f"{self.ENDPOINT}{storage.pk}/exports/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data[0]["name"],
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        self.assertEqual(response.data[0]["size"], 456)
