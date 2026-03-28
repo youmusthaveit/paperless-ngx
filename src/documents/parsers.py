@@ -26,7 +26,13 @@ def is_mime_type_supported(mime_type: str) -> bool:
     """
     Returns True if the mime type is supported, False otherwise
     """
-    return get_parser_registry().get_parser_for_file(mime_type, "") is not None
+    if get_parser_registry().get_parser_for_file(mime_type, "") is not None:
+        return True
+
+    return any(
+        mime_type in parser_class.supported_mime_types()
+        for parser_class in get_parser_registry().all_parsers()
+    )
 
 
 def get_default_file_extension(mime_type: str) -> str:
@@ -36,6 +42,13 @@ def get_default_file_extension(mime_type: str) -> str:
     """
     parser_class = get_parser_registry().get_parser_for_file(mime_type, "")
     if parser_class is not None:
+        supported = parser_class.supported_mime_types()
+        if mime_type in supported:
+            return supported[mime_type]
+
+    # Some parsers need the file path to decide if they can handle a MIME type
+    # at runtime, but still declare the preferred extension for that MIME.
+    for parser_class in get_parser_registry().all_parsers():
         supported = parser_class.supported_mime_types()
         if mime_type in supported:
             return supported[mime_type]

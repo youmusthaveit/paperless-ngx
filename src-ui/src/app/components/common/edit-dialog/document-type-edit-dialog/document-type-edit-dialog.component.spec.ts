@@ -63,4 +63,22 @@ describe('DocumentTypeEditDialogComponent', () => {
     expect(component.objectForm.get('custom_fields')).toBeTruthy()
     expect(component.objectForm.get('custom_fields').value).toEqual([])
   })
+
+  it('should include xrechnung settings in the form', () => {
+    expect(component.objectForm.get('enable_xrechnung_import')).toBeTruthy()
+    expect(
+      component.objectForm.get('xrechnung_correspondent_field')
+    ).toBeTruthy()
+    expect(
+      component.objectForm.get('xrechnung_custom_field_mappings')
+    ).toBeTruthy()
+  })
+
+  it('should add and remove xrechnung mappings', () => {
+    component.addXRechnungMapping()
+    expect(component.xrechnungMappings.length).toBe(1)
+
+    component.removeXRechnungMapping(0)
+    expect(component.xrechnungMappings.length).toBe(0)
+  })
 })

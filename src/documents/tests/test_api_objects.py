@@ -737,6 +737,63 @@ class TestApiDocumentTypes(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["custom_fields"], [custom_field.id])
 
+    def test_api_create_document_type_with_xrechnung_settings(self) -> None:
+        custom_field = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "XRechnung",
+                    "enable_xrechnung_import": True,
+                    "xrechnung_correspondent_field": "seller_name",
+                    "xrechnung_custom_field_mappings": [
+                        {
+                            "custom_field": custom_field.id,
+                            "source": "invoice_number",
+                        },
+                    ],
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["enable_xrechnung_import"])
+        self.assertEqual(response.data["xrechnung_correspondent_field"], "seller_name")
+        self.assertEqual(
+            response.data["xrechnung_custom_field_mappings"],
+            [
+                {
+                    "custom_field": custom_field.id,
+                    "source": "invoice_number",
+                },
+            ],
+        )
+
+    def test_api_rejects_multiple_xrechnung_document_types(self) -> None:
+        DocumentType.objects.create(
+            name="Existing XRechnung",
+            enable_xrechnung_import=True,
+        )
+
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "Second XRechnung",
+                    "enable_xrechnung_import": True,
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("enable_xrechnung_import", response.data)
+
 
 class TestBulkEditObjects(APITestCase):
     # See test_api_permissions.py for bulk tests on permissions

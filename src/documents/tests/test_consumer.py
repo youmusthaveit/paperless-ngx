@@ -34,6 +34,9 @@ from documents.tests.utils import DirectoriesMixin
 from documents.tests.utils import DummyProgressManager
 from documents.tests.utils import FileSystemAssertsMixin
 from documents.tests.utils import GetConsumerMixin
+from paperless.parsers.xrechnung import InvoiceData
+from paperless.parsers.xrechnung import InvoiceParty
+from paperless.parsers.xrechnung import XRechnungDocumentParser
 from paperless_mail.models import MailRule
 
 
@@ -138,6 +141,40 @@ class FaultyParser(_BaseNewStyleParser):
 class FaultyGenericExceptionParser(_BaseNewStyleParser):
     def parse(self, document_path, mime_type, *, produce_archive: bool = True) -> None:
         raise Exception("Generic exception.")
+
+
+class SyntheticXRechnungParser(XRechnungDocumentParser):
+    def __enter__(self):
+        super().__enter__()
+        thumb = self._tempdir / "thumb.webp"
+        thumb.write_bytes(b"fake-thumb")
+        self._thumb = thumb
+        return self
+
+    def parse(self, document_path, mime_type, *, produce_archive: bool = True) -> None:
+        self._invoice = InvoiceData(
+            profile="xrechnung",
+            invoice_number="XR-123",
+            invoice_type_code="380",
+            issue_date=datetime.date(2024, 12, 6),
+            due_amount="42.50",
+            grand_total="42.50",
+            tax_total="6.79",
+            currency="EUR",
+            buyer_reference="BR-1",
+            payment_reference="PR-1",
+            payment_terms="Payable immediately",
+            seller=InvoiceParty(name="ACME Corp", email="seller@example.com"),
+            buyer=InvoiceParty(name="Buyer GmbH"),
+            notes=[],
+            lines=[],
+            raw_text="XRechnung",
+        )
+        self._text = "XRechnung"
+        self._archive_path = None
+
+    def get_thumbnail(self, document_path, mime_type) -> Path:
+        return self._thumb
 
 
 def fake_magic_from_file(file, *, mime=False):  # NOSONAR
@@ -429,6 +466,53 @@ class TestConsumer(
         )
         self._assert_first_last_send_progress()
 
+    def testXRechnungMappingsAreAppliedFromDocumentType(self) -> None:
+        custom_field_text = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        custom_field_date = CustomField.objects.create(
+            name="Issue Date",
+            data_type=CustomField.FieldDataType.DATE,
+        )
+        DocumentType.objects.create(
+            name="XRechnung",
+            enable_xrechnung_import=True,
+            xrechnung_correspondent_field="seller_name",
+            xrechnung_custom_field_mappings=[
+                {
+                    "custom_field": custom_field_text.pk,
+                    "source": "invoice_number",
+                },
+                {
+                    "custom_field": custom_field_date.pk,
+                    "source": "issue_date",
+                },
+            ],
+        )
+
+        with mock.patch("documents.consumer.get_parser_registry") as mock_registry:
+            mock_registry.return_value.get_parser_for_file.return_value = (
+                SyntheticXRechnungParser
+            )
+
+            with self.get_consumer(self.get_test_file()) as consumer:
+                consumer.run()
+
+                document = Document.objects.first()
+
+        self.assertEqual(document.document_type.name, "XRechnung")
+        self.assertEqual(document.correspondent.name, "ACME Corp")
+        self.assertEqual(
+            document.custom_fields.get(field=custom_field_text).value,
+            "XR-123",
+        )
+        self.assertEqual(
+            document.custom_fields.get(field=custom_field_date).value,
+            datetime.date(2024, 12, 6),
+        )
+        self._assert_first_last_send_progress()
+
     def testOverrideAsn(self) -> None:
         with self.get_consumer(
             self.get_test_file(),
@@ -609,7 +693,7 @@ class TestConsumer(
 
         self._assert_first_last_send_progress(last_status="FAILED")
 
-    @mock.patch("documents.consumer.ConsumerPlugin._write")
+    @mock.patch("documents.consumer.document_write_from_path")
     def testPostSaveError(self, m) -> None:
         filename = self.get_test_file()
         m.side_effect = OSError("NO.")

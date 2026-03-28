@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
@@ -30,6 +31,7 @@ from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 from django.utils.crypto import get_random_string
+from django.utils.dateparse import parse_date
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.utils.timezone import get_current_timezone
@@ -76,6 +78,7 @@ from documents.models import WorkflowAction
 from documents.models import WorkflowActionEmail
 from documents.models import WorkflowActionWebhook
 from documents.models import WorkflowTrigger
+from documents.parsers import ParseError
 from documents.parsers import is_mime_type_supported
 from documents.permissions import get_document_count_filter_for_user
 from documents.permissions import get_groups_with_only_permission
@@ -87,6 +90,9 @@ from documents.templating.filepath import validate_filepath_template_and_render
 from documents.templating.utils import convert_format_str_to_template_format
 from documents.validators import uri_validator
 from documents.validators import url_validator
+from paperless.parsers.xrechnung import XRECHNUNG_SOURCE_FIELDS
+from paperless.parsers.xrechnung import get_xrechnung_source_value
+from paperless.parsers.xrechnung import parse_xrechnung_invoice
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -504,6 +510,94 @@ class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
         queryset=CustomField.objects.all(),
         required=False,
     )
+    xrechnung_correspondent_field = serializers.ChoiceField(
+        choices=[(field, field) for field in XRECHNUNG_SOURCE_FIELDS],
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+    )
+    xrechnung_custom_field_mappings = serializers.JSONField(required=False)
+
+    def validate_xrechnung_custom_field_mappings(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError(_("Must be a list of mappings."))
+
+        validated: list[dict[str, int | str]] = []
+        custom_field_ids: list[int] = []
+        seen_custom_field_ids: set[int] = set()
+
+        for index, mapping in enumerate(value):
+            if not isinstance(mapping, dict):
+                raise serializers.ValidationError(
+                    _(f"Entry {index + 1} must be an object."),
+                )
+
+            custom_field = mapping.get("custom_field")
+            source = mapping.get("source")
+
+            if not isinstance(custom_field, int):
+                raise serializers.ValidationError(
+                    _(f"Entry {index + 1} must include a valid custom_field id."),
+                )
+            if custom_field in seen_custom_field_ids:
+                raise serializers.ValidationError(
+                    _(f"Custom field {custom_field} is mapped more than once."),
+                )
+            if source not in XRECHNUNG_SOURCE_FIELDS:
+                raise serializers.ValidationError(
+                    _(
+                        f"Entry {index + 1} references an unknown XRechnung source field.",
+                    ),
+                )
+
+            validated.append(
+                {
+                    "custom_field": custom_field,
+                    "source": source,
+                },
+            )
+            custom_field_ids.append(custom_field)
+            seen_custom_field_ids.add(custom_field)
+
+        existing_ids = set(
+            CustomField.objects.filter(pk__in=custom_field_ids).values_list(
+                "pk",
+                flat=True,
+            ),
+        )
+        missing_ids = sorted(set(custom_field_ids) - existing_ids)
+        if missing_ids:
+            raise serializers.ValidationError(
+                _(
+                    f"Unknown custom field ids: {', '.join(str(pk) for pk in missing_ids)}.",
+                ),
+            )
+
+        return validated
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        enable_xrechnung_import = attrs.get(
+            "enable_xrechnung_import",
+            getattr(self.instance, "enable_xrechnung_import", False),
+        )
+        if enable_xrechnung_import:
+            existing = DocumentType.objects.filter(enable_xrechnung_import=True)
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    {
+                        "enable_xrechnung_import": _(
+                            "Only one document type can be configured for automatic XRechnung imports.",
+                        ),
+                    },
+                )
+
+        return attrs
 
     class Meta:
         model = DocumentType
@@ -516,6 +610,9 @@ class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
             "is_insensitive",
             "document_count",
             "custom_fields",
+            "enable_xrechnung_import",
+            "xrechnung_correspondent_field",
+            "xrechnung_custom_field_mappings",
             "owner",
             "permissions",
             "user_can_change",
@@ -1140,6 +1237,10 @@ class DocumentSerializer(
         return super().validate(attrs)
 
     def update(self, instance: Document, validated_data):
+        document_type_changed = "document_type" in validated_data
+        correspondent_changed = "correspondent" in validated_data
+        custom_fields_changed = "custom_fields" in validated_data
+
         if "created_date" in validated_data and "created" not in validated_data:
             instance.created = validated_data.get("created_date")
             instance.save()
@@ -1218,9 +1319,179 @@ class DocumentSerializer(
                 super().update(instance, validated_data)
         else:
             super().update(instance, validated_data)
+
+        if document_type_changed:
+            self._apply_xrechnung_field_transfer(
+                instance,
+                overwrite_correspondent=not correspondent_changed,
+                overwrite_custom_fields=not custom_fields_changed,
+            )
         # hard delete custom field instances that were soft deleted
         CustomFieldInstance.deleted_objects.filter(document=instance).delete()
         return instance
+
+    def _apply_xrechnung_field_transfer(
+        self,
+        instance: Document,
+        *,
+        overwrite_correspondent: bool,
+        overwrite_custom_fields: bool,
+    ) -> None:
+        document_type = instance.document_type
+        if (
+            document_type is None
+            or instance.mime_type not in {"application/xml", "text/xml"}
+            or (
+                not document_type.enable_xrechnung_import
+                and not document_type.xrechnung_correspondent_field
+                and not document_type.xrechnung_custom_field_mappings
+            )
+        ):
+            return
+
+        try:
+            with instance.local_source_path() as source_path:
+                invoice = parse_xrechnung_invoice(source_path)
+        except (FileNotFoundError, ParseError):
+            return
+
+        if overwrite_correspondent and document_type.xrechnung_correspondent_field:
+            value = get_xrechnung_source_value(
+                invoice,
+                document_type.xrechnung_correspondent_field,
+            )
+            correspondent = self._resolve_xrechnung_correspondent(
+                value,
+                document_type.owner,
+            )
+            if correspondent is not None and instance.correspondent != correspondent:
+                instance.correspondent = correspondent
+                instance.save(update_fields=["correspondent"])
+
+        if (
+            not overwrite_custom_fields
+            or not document_type.xrechnung_custom_field_mappings
+        ):
+            return
+
+        mappings_by_custom_field = {
+            mapping["custom_field"]: mapping["source"]
+            for mapping in document_type.xrechnung_custom_field_mappings
+            if isinstance(mapping, dict)
+            and isinstance(mapping.get("custom_field"), int)
+            and mapping.get("source") in XRECHNUNG_SOURCE_FIELDS
+        }
+        for field in CustomField.objects.filter(pk__in=mappings_by_custom_field.keys()):
+            value = self._coerce_xrechnung_custom_field_value(
+                field,
+                get_xrechnung_source_value(invoice, mappings_by_custom_field[field.pk]),
+                invoice.currency,
+            )
+            if value is None:
+                continue
+            data_store_name = CustomFieldInstance.get_value_field_name(field.data_type)
+            CustomFieldInstance.objects.update_or_create(
+                document=instance,
+                field=field,
+                defaults={data_store_name: value},
+            )
+
+    def _resolve_xrechnung_correspondent(
+        self,
+        value: object,
+        owner: User | None,
+    ) -> Correspondent | None:
+        if not isinstance(value, str):
+            return None
+
+        normalized_value = value.strip()
+        if not normalized_value:
+            return None
+
+        if owner is not None:
+            owned_match = Correspondent.objects.filter(
+                owner=owner,
+                name__iexact=normalized_value,
+            ).first()
+            if owned_match is not None:
+                return owned_match
+
+        global_match = Correspondent.objects.filter(
+            owner__isnull=True,
+            name__iexact=normalized_value,
+        ).first()
+        if global_match is not None:
+            return global_match
+
+        return Correspondent.objects.create(
+            name=normalized_value,
+            owner=owner,
+        )
+
+    def _coerce_xrechnung_custom_field_value(
+        self,
+        field: CustomField,
+        raw_value: object,
+        currency: str | None,
+    ) -> object | None:
+        if raw_value is None:
+            return None
+
+        if field.data_type in (
+            CustomField.FieldDataType.STRING,
+            CustomField.FieldDataType.URL,
+            CustomField.FieldDataType.LONG_TEXT,
+        ):
+            return str(raw_value)
+
+        if field.data_type == CustomField.FieldDataType.DATE:
+            if isinstance(raw_value, datetime):
+                return raw_value.date()
+            if isinstance(raw_value, date):
+                return raw_value
+            return parse_date(str(raw_value))
+
+        if field.data_type == CustomField.FieldDataType.INT:
+            try:
+                return int(str(raw_value))
+            except (TypeError, ValueError):
+                return None
+
+        if field.data_type == CustomField.FieldDataType.FLOAT:
+            try:
+                return float(str(raw_value))
+            except (TypeError, ValueError):
+                return None
+
+        if field.data_type == CustomField.FieldDataType.MONETARY:
+            value = str(raw_value).strip()
+            if not value:
+                return None
+            return f"{currency} {value}" if currency else value
+
+        if field.data_type == CustomField.FieldDataType.BOOL:
+            if isinstance(raw_value, bool):
+                return raw_value
+            normalized = str(raw_value).strip().lower()
+            if normalized in {"1", "true", "yes", "y"}:
+                return True
+            if normalized in {"0", "false", "no", "n"}:
+                return False
+            return None
+
+        if field.data_type == CustomField.FieldDataType.SELECT:
+            value = str(raw_value).strip()
+            if not value or not field.extra_data:
+                return None
+            for option in field.extra_data.get("select_options", []):
+                if (
+                    option.get("id") == value
+                    or option.get("label", "").lower() == value.lower()
+                ):
+                    return option.get("id")
+            return None
+
+        return None
 
     def __init__(self, *args, **kwargs) -> None:
         self.truncate_content = kwargs.pop("truncate_content", False)
