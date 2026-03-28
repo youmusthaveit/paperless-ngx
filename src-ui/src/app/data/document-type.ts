@@ -1,3 +1,5 @@
 import { MatchingModel } from './matching-model'
 
-export interface DocumentType extends MatchingModel {}
+export interface DocumentType extends MatchingModel {
+  custom_fields?: number[]
+}

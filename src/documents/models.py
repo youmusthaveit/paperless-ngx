@@ -151,6 +151,13 @@ class Tag(MatchingModel, TreeNodeModel):
 
 
 class DocumentType(MatchingModel):
+    custom_fields = models.ManyToManyField(
+        "CustomField",
+        blank=True,
+        related_name="document_types",
+        verbose_name=_("custom fields"),
+    )
+
     class Meta(MatchingModel.Meta):
         verbose_name = _("document type")
         verbose_name_plural = _("document types")

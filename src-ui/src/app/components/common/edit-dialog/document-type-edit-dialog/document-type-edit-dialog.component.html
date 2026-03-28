@@ -16,6 +16,13 @@
         <pngx-input-text i18n-title title="Matching pattern" formControlName="match" [error]="error?.match"></pngx-input-text>
         <pngx-input-check i18n-title title="Case insensitive" formControlName="is_insensitive"></pngx-input-check>
       }
+      <pngx-input-select
+        i18n-title
+        title="Custom fields"
+        [items]="customFields"
+        formControlName="custom_fields"
+        [multiple]="true"
+        [allowNull]="true"></pngx-input-select>
     </div>
 
     <div *pngxIfOwner="object">

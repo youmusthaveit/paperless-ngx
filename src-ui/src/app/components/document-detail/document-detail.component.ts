@@ -459,6 +459,13 @@ export class DocumentDetailComponent
     currentDocument: Document,
     originalDocument: Document
   ): void {
+    if (originalDocument.document_type) {
+      this.addDocumentTypeCustomFieldsToDocument(
+        originalDocument,
+        originalDocument.document_type
+      )
+    }
+
     this.store = new BehaviorSubject({
       title: originalDocument.title,
       content: originalDocument.content,
@@ -714,6 +721,8 @@ export class DocumentDetailComponent
         Object.assign(this.document, this.mapFormToDoc(values))
       })
 
+    this.setupDocumentTypeCustomFieldSync()
+
     if (
       this.permissionsService.currentUserCan(
         PermissionAction.View,
@@ -734,7 +743,15 @@ export class DocumentDetailComponent
       this.documentTypeService
         .listAll()
         .pipe(first(), takeUntil(this.unsubscribeNotifier))
-        .subscribe((result) => (this.documentTypes = result.results))
+        .subscribe((result) => {
+          this.documentTypes = result.results
+          if (this.document?.document_type) {
+            this.ensureDocumentTypeCustomFields(
+              this.document.document_type,
+              false
+            )
+          }
+        })
     }
     if (
       this.permissionsService.currentUserCan(
@@ -874,6 +891,9 @@ export class DocumentDetailComponent
     this.previewLoaded = false
     this.requiresPassword = false
     this.updateFormForCustomFields()
+    if (doc.document_type) {
+      this.ensureDocumentTypeCustomFields(doc.document_type, false)
+    }
     this.loadMetadataForSelectedVersion()
     if (
       this.permissionsService.currentUserHasObjectPermissions(
@@ -977,6 +997,73 @@ export class DocumentDetailComponent
 
   get customFieldFormFields(): FormArray {
     return this.documentForm.get('custom_fields') as FormArray
+  }
+
+  private getDocumentTypeById(documentTypeId: number): DocumentType {
+    return this.documentTypes?.find((type) => type.id === documentTypeId)
+  }
+
+  private addDocumentTypeCustomFieldsToDocument(
+    doc: Document,
+    documentTypeId: number
+  ): boolean {
+    const documentType = this.getDocumentTypeById(documentTypeId)
+    const missingFieldIds =
+      documentType?.custom_fields?.filter(
+        (fieldId) =>
+          !doc?.custom_fields?.some(
+            (fieldInstance) => fieldInstance.field === fieldId
+          )
+      ) ?? []
+
+    if (!missingFieldIds.length) {
+      return false
+    }
+
+    if (!doc.custom_fields) {
+      doc.custom_fields = []
+    }
+
+    missingFieldIds.forEach((fieldId) => {
+      doc.custom_fields.push({
+        field: fieldId,
+        value: null,
+        document: doc.id,
+        created: new Date(),
+      })
+    })
+
+    return true
+  }
+
+  private ensureDocumentTypeCustomFields(
+    documentTypeId: number,
+    markAsDirty: boolean = true
+  ) {
+    if (
+      !this.addDocumentTypeCustomFieldsToDocument(this.document, documentTypeId)
+    ) {
+      return
+    }
+
+    this.updateFormForCustomFields(markAsDirty)
+    if (markAsDirty) {
+      this.documentForm.get('custom_fields').markAsDirty()
+    }
+    this.documentForm.updateValueAndValidity()
+  }
+
+  private setupDocumentTypeCustomFieldSync() {
+    this.documentForm
+      .get('document_type')
+      .valueChanges.pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe((documentTypeId: number | null) => {
+        if (!documentTypeId || !this.document) {
+          return
+        }
+
+        this.ensureDocumentTypeCustomFields(documentTypeId)
+      })
   }
 
   getSuggestions() {

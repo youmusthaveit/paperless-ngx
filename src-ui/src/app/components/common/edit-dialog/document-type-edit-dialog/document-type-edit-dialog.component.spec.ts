@@ -58,4 +58,9 @@ describe('DocumentTypeEditDialogComponent', () => {
     fixture.detectChanges()
     expect(editTitleSpy).toHaveBeenCalled()
   })
+
+  it('should include custom fields in the form', () => {
+    expect(component.objectForm.get('custom_fields')).toBeTruthy()
+    expect(component.objectForm.get('custom_fields').value).toEqual([])
+  })
 })

@@ -499,6 +499,12 @@ class CorrespondentSerializer(MatchingModelSerializer, OwnedObjectSerializer):
 
 
 class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
+    custom_fields = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=CustomField.objects.all(),
+        required=False,
+    )
+
     class Meta:
         model = DocumentType
         fields = (
@@ -509,6 +515,7 @@ class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
             "matching_algorithm",
             "is_insensitive",
             "document_count",
+            "custom_fields",
             "owner",
             "permissions",
             "user_can_change",

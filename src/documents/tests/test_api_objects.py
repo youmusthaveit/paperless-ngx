@@ -688,6 +688,56 @@ class TestApiStoragePaths(DirectoriesMixin, APITestCase):
         self.assertEqual(response.data, "42")
 
 
+class TestApiDocumentTypes(DirectoriesMixin, APITestCase):
+    ENDPOINT = "/api/document_types/"
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        user = User.objects.create_superuser(username="temp_admin")
+        self.client.force_authenticate(user=user)
+
+    def test_api_create_document_type_with_custom_fields(self) -> None:
+        custom_field_1 = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        custom_field_2 = CustomField.objects.create(
+            name="Due Date",
+            data_type=CustomField.FieldDataType.DATE,
+        )
+
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "Invoice",
+                    "custom_fields": [custom_field_1.id, custom_field_2.id],
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertCountEqual(
+            response.data["custom_fields"],
+            [custom_field_1.id, custom_field_2.id],
+        )
+
+    def test_api_retrieve_document_type_includes_custom_fields(self) -> None:
+        custom_field = CustomField.objects.create(
+            name="Contract Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(name="Contract")
+        document_type.custom_fields.add(custom_field)
+
+        response = self.client.get(f"{self.ENDPOINT}{document_type.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_fields"], [custom_field.id])
+
+
 class TestBulkEditObjects(APITestCase):
     # See test_api_permissions.py for bulk tests on permissions
     def setUp(self) -> None:

@@ -6,9 +6,11 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms'
 import { EditDialogComponent } from 'src/app/components/common/edit-dialog/edit-dialog.component'
+import { CustomField } from 'src/app/data/custom-field'
 import { DocumentType } from 'src/app/data/document-type'
 import { DEFAULT_MATCHING_ALGORITHM } from 'src/app/data/matching-model'
 import { IfOwnerDirective } from 'src/app/directives/if-owner.directive'
+import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
 import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
 import { UserService } from 'src/app/services/rest/user.service'
 import { SettingsService } from 'src/app/services/settings.service'
@@ -32,11 +34,16 @@ import { TextComponent } from '../../input/text/text.component'
   ],
 })
 export class DocumentTypeEditDialogComponent extends EditDialogComponent<DocumentType> {
+  customFields: CustomField[] = []
+
   constructor() {
     super()
     this.service = inject(DocumentTypeService)
     this.userService = inject(UserService)
     this.settingsService = inject(SettingsService)
+    inject(CustomFieldsService)
+      .listAll()
+      .subscribe((result) => (this.customFields = result.results))
   }
 
   getCreateTitle() {
@@ -53,6 +60,7 @@ export class DocumentTypeEditDialogComponent extends EditDialogComponent<Documen
       matching_algorithm: new FormControl(DEFAULT_MATCHING_ALGORITHM),
       match: new FormControl(''),
       is_insensitive: new FormControl(true),
+      custom_fields: new FormControl([]),
       permissions_form: new FormControl(null),
     })
   }
