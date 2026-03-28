@@ -24,6 +24,8 @@ from django.db.models import Q
 from django.dispatch import receiver
 from django.utils import timezone
 from filelock import FileLock
+from guardian.shortcuts import get_groups_with_perms
+from guardian.shortcuts import get_users_with_perms
 
 from documents import matching
 from documents.caching import clear_document_caches
@@ -43,6 +45,7 @@ from documents.models import WorkflowAction
 from documents.models import WorkflowRun
 from documents.models import WorkflowTrigger
 from documents.permissions import get_objects_for_user_owner_aware
+from documents.plugins.helpers import DocumentsStatusManager
 from documents.storage import document_checksum_matches
 from documents.storage import document_delete
 from documents.storage import document_exists
@@ -77,6 +80,52 @@ def add_inbox_tags(sender, document: Document, logging_group=None, **kwargs):
         tags = Tag.objects.all()
     inbox_tags = tags.filter(is_inbox_tag=True)
     document.add_nested_tags(inbox_tags)
+
+
+def add_or_update_document_in_llm_index(
+    sender,
+    document: Document,
+    logging_group=None,
+    **kwargs,
+) -> None:
+    from documents.tasks import update_document_in_llm_index
+    from paperless.config import AIConfig
+
+    ai_config = AIConfig()
+    if not ai_config.llm_index_enabled:
+        return
+
+    update_document_in_llm_index.delay(document)
+
+
+def send_websocket_document_updated(
+    sender,
+    document: Document,
+    logging_group=None,
+    **kwargs,
+) -> None:
+    users_can_view = list(
+        get_users_with_perms(
+            document,
+            only_with_perms_in=["view_document"],
+            with_group_users=False,
+        ).values_list("pk", flat=True),
+    )
+    groups_can_view = list(
+        get_groups_with_perms(
+            document,
+            only_with_perms_in=["view_document"],
+        ).values_list("pk", flat=True),
+    )
+
+    with DocumentsStatusManager() as status_mgr:
+        status_mgr.send_document_updated(
+            document_id=document.pk,
+            modified=document.modified.isoformat(),
+            owner_id=document.owner_id,
+            users_can_view=users_can_view,
+            groups_can_view=groups_can_view,
+        )
 
 
 def _suggestion_printer(

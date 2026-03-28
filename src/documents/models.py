@@ -441,12 +441,23 @@ class Document(SoftDeleteModel, ModelWithOwner):  # type: ignore[django-manager-
         return document_storage_path("originals", self.source_name)
 
     @property
+    def _uses_gpg_storage(self) -> bool:
+        """
+        Support older import/export code paths that may still attach a transient
+        ``storage_type`` attribute while remaining compatible with installations
+        where the database field has been removed.
+        """
+        storage_type = getattr(self, "storage_type", None)
+        gpg_storage_type = getattr(type(self), "STORAGE_TYPE_GPG", None)
+        return storage_type is not None and storage_type == gpg_storage_type
+
+    @property
     def source_name(self) -> str:
         if self.filename:
             return str(self.filename)
 
         fname = f"{self.pk:07}{self.file_type}"
-        if self.storage_type == self.STORAGE_TYPE_GPG:
+        if self._uses_gpg_storage:
             fname += ".gpg"  # pragma: no cover
         return fname
 
@@ -557,7 +568,7 @@ class Document(SoftDeleteModel, ModelWithOwner):  # type: ignore[django-manager-
     @property
     def thumbnail_name(self) -> str:
         webp_file_name = f"{self.pk:07}.webp"
-        if self.storage_type == self.STORAGE_TYPE_GPG:
+        if self._uses_gpg_storage:
             webp_file_name += ".gpg"
         return webp_file_name
 

@@ -5,7 +5,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("documents", "0016_document_version_index_and_more"),
+        ("documents", "0016_sha256_checksums"),
         ("documents", "1076_savedview_group_by"),
     ]
 

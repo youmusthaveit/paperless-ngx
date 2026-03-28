@@ -122,7 +122,9 @@ def thumbnail_last_modified(request: Any, pk: int) -> datetime | None:
     Cache should be (slightly?) faster than filesystem
     """
     try:
-        doc = Document.objects.only("storage_type").get(pk=pk)
+        doc = resolve_effective_document_by_pk(pk, request).document
+        if doc is None:
+            return None
         last_modified = doc.thumbnail_modified_time()
         if last_modified is None:
             return None
