@@ -20,13 +20,19 @@
       <trans-unit id="ngb.carousel.previous" datatype="html">
         <source>Previous</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">node_modules/.pnpm/@ng-bootstrap+ng-bootstrap@20.0.0_@angular+common@21.2.4_@angular+core@21.2.4_@angular+_a674c967733fd102e5fef61ea5e6b837/node_modules/src/carousel/carousel.ts</context>
           <context context-type="linenumber">159,162</context>
+=======
+          <context context-type="sourcefile">node_modules/.pnpm/@ng-bootstrap+ng-bootstrap@19.0.1_@angular+common@20.3.15_@angular+core@20.3.15_@angula_40533c760dbaadbd90323f0d78d15fb8/node_modules/src/carousel/carousel.ts</context>
+          <context context-type="linenumber">155,157</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="ngb.carousel.next" datatype="html">
         <source>Next</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">node_modules/.pnpm/@ng-bootstrap+ng-bootstrap@20.0.0_@angular+common@21.2.4_@angular+core@21.2.4_@angular+_a674c967733fd102e5fef61ea5e6b837/node_modules/src/carousel/carousel.ts</context>
           <context context-type="linenumber">202,203</context>
         </context-group>
@@ -51,6 +57,10 @@
         <context-group purpose="location">
           <context context-type="sourcefile">node_modules/.pnpm/@ng-bootstrap+ng-bootstrap@20.0.0_@angular+common@21.2.4_@angular+core@21.2.4_@angular+_a674c967733fd102e5fef61ea5e6b837/node_modules/src/datepicker/datepicker-navigation-select.ts</context>
           <context context-type="linenumber">91</context>
+=======
+          <context context-type="sourcefile">node_modules/.pnpm/@ng-bootstrap+ng-bootstrap@19.0.1_@angular+common@20.3.15_@angular+core@20.3.15_@angula_40533c760dbaadbd90323f0d78d15fb8/node_modules/src/carousel/carousel.ts</context>
+          <context context-type="linenumber">195</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="ngb.datepicker.previous-month" datatype="html">
@@ -340,7 +350,11 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">211</context>
+=======
+          <context context-type="linenumber">244</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/custom-fields/custom-fields.component.html</context>
@@ -518,7 +532,11 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/settings/settings.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">136</context>
+=======
+          <context context-type="linenumber">152</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2180291763949669799" datatype="html">
@@ -536,7 +554,11 @@
         <source>Cancel</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/config/config.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">62</context>
+=======
+          <context context-type="linenumber">58</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/settings/settings.component.html</context>
@@ -611,7 +633,11 @@
         <source>Save</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/config/config.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">65</context>
+=======
+          <context context-type="linenumber">61</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/settings/settings.component.html</context>
@@ -750,7 +776,11 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">35</context>
+=======
+          <context context-type="linenumber">38</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.html</context>
@@ -839,7 +869,11 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">128</context>
+=======
+          <context context-type="linenumber">167</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/custom-fields/custom-fields.component.html</context>
@@ -1055,6 +1089,7 @@
           <context context-type="linenumber">145</context>
         </context-group>
       </trans-unit>
+<<<<<<< HEAD
       <trans-unit id="3969258421469113318" datatype="html">
         <source>Full search links to</source>
         <context-group purpose="location">
@@ -1084,6 +1119,8 @@
           <context context-type="linenumber">208</context>
         </context-group>
       </trans-unit>
+=======
+>>>>>>> feat/group-list
       <trans-unit id="8901931207592071833" datatype="html">
         <source>Update checking</source>
         <context-group purpose="location">
@@ -1321,15 +1358,19 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">236</context>
+=======
+          <context context-type="linenumber">548</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">58</context>
+          <context context-type="linenumber">67</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">95</context>
+          <context context-type="linenumber">105</context>
         </context-group>
       </trans-unit>
       <trans-unit id="293524471897878391" datatype="html">
@@ -1575,7 +1616,82 @@
         <source>This will suppress all messages about document processing status on the dashboard.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/admin/settings/settings.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">389</context>
+=======
+          <context context-type="linenumber">351</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2159130950882492111" datatype="html">
+        <source>Cancel</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/admin/settings/settings.component.html</context>
+          <context context-type="linenumber">361</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/confirm-dialog/confirm-dialog.component.ts</context>
+          <context context-type="linenumber">47</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component.html</context>
+          <context context-type="linenumber">25</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/custom-field-edit-dialog/custom-field-edit-dialog.component.html</context>
+          <context context-type="linenumber">51</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component.html</context>
+          <context context-type="linenumber">27</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/group-edit-dialog/group-edit-dialog.component.html</context>
+          <context context-type="linenumber">19</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/mail-account-edit-dialog/mail-account-edit-dialog.component.html</context>
+          <context context-type="linenumber">39</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/mail-rule-edit-dialog/mail-rule-edit-dialog.component.html</context>
+          <context context-type="linenumber">75</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component.html</context>
+          <context context-type="linenumber">76</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/tag-edit-dialog/tag-edit-dialog.component.html</context>
+          <context context-type="linenumber">30</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/user-edit-dialog/user-edit-dialog.component.html</context>
+          <context context-type="linenumber">56</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/edit-dialog/workflow-edit-dialog/workflow-edit-dialog.component.html</context>
+          <context context-type="linenumber">115</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/permissions-dialog/permissions-dialog.component.html</context>
+          <context context-type="linenumber">25</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.html</context>
+          <context context-type="linenumber">184</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/bulk-editor/custom-fields-bulk-edit-dialog/custom-fields-bulk-edit-dialog.component.html</context>
+          <context context-type="linenumber">81</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/save-view-config-dialog/save-view-config-dialog.component.html</context>
+          <context context-type="linenumber">20</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.html</context>
+          <context context-type="linenumber">82</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6839066544204061364" datatype="html">
@@ -1820,7 +1936,27 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">147</context>
+=======
+          <context context-type="linenumber">187</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">4</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">4</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">4</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">4</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="4880728824338713664" datatype="html">
@@ -1961,15 +2097,19 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">263</context>
+=======
+          <context context-type="linenumber">559</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">34</context>
+          <context context-type="linenumber">43</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">92</context>
+          <context context-type="linenumber">102</context>
         </context-group>
       </trans-unit>
       <trans-unit id="5968132631442328843" datatype="html">
@@ -2419,6 +2559,61 @@
           <context context-type="linenumber">169</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
+=======
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">10</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">10</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">10</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">10</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">121</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">121</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">121</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">121</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">133</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">133</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">133</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">133</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">258</context>
+        </context-group>
+        <context-group purpose="location">
+>>>>>>> feat/group-list
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.html</context>
           <context context-type="linenumber">37</context>
         </context-group>
@@ -2449,12 +2644,21 @@
           <context context-type="linenumber">110</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/document-attributes/management-list/management-list.component.ts</context>
           <context context-type="linenumber">261</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/management-list/management-list.component.ts</context>
           <context context-type="linenumber">422</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">254</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">377</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1373208150912772963" datatype="html">
@@ -2495,8 +2699,13 @@
           <context context-type="linenumber">201</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/mail/mail.component.ts</context>
           <context context-type="linenumber">302</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">379</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/workflows/workflows.component.ts</context>
@@ -2822,8 +3031,13 @@
           <context context-type="linenumber">203</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/mail/mail.component.ts</context>
           <context context-type="linenumber">304</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">381</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/workflows/workflows.component.ts</context>
@@ -3021,14 +3235,56 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">61</context>
+=======
+          <context context-type="linenumber">5</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">242</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">541</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.html</context>
           <context context-type="linenumber">84</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.ts</context>
+=======
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">51</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="4369111787961525769" datatype="html">
+        <source>Document Types</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/app-frame/app-frame.component.html</context>
+          <context context-type="linenumber">194</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/app-frame/app-frame.component.html</context>
+          <context context-type="linenumber">196</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/dashboard/widgets/statistics-widget/statistics-widget.component.html</context>
+          <context context-type="linenumber">120</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5421255270838137624" datatype="html">
+        <source>Storage Paths</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/app-frame/app-frame.component.html</context>
+          <context context-type="linenumber">201</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/app-frame/app-frame.component.html</context>
+>>>>>>> feat/group-list
           <context context-type="linenumber">203</context>
         </context-group>
         <context-group purpose="location">
@@ -3745,11 +4001,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">29</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">37</context>
+=======
+          <context context-type="linenumber">31</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1496549861742963591" datatype="html">
@@ -3818,15 +4078,19 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">272</context>
+=======
+          <context context-type="linenumber">562</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">38</context>
+          <context context-type="linenumber">47</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">93</context>
+          <context context-type="linenumber">103</context>
         </context-group>
       </trans-unit>
       <trans-unit id="6052766076365105714" datatype="html">
@@ -4706,8 +4970,13 @@
           <context context-type="linenumber">13</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/document-attributes/management-list/tag-list/tag-list.component.ts</context>
           <context context-type="linenumber">49</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/tag-list/tag-list.component.ts</context>
+          <context context-type="linenumber">50</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="8621797738551294959" datatype="html">
@@ -5414,7 +5683,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">94</context>
+          <context context-type="linenumber">104</context>
         </context-group>
       </trans-unit>
       <trans-unit id="8686921715946540725" datatype="html">
@@ -5729,7 +5998,11 @@
         <source>Open <x id="PH" equiv-text="this.title"/> filter</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/common/filterable-dropdown/filterable-dropdown.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">823</context>
+=======
+          <context context-type="linenumber">802</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="7005745151564974365" datatype="html">
@@ -7130,7 +7403,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">317</context>
+=======
+          <context context-type="linenumber">316</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">438</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="78870852467682010" datatype="html">
@@ -7145,7 +7426,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">357</context>
+=======
+          <context context-type="linenumber">362</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">484</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="157572966557284263" datatype="html">
@@ -7160,7 +7449,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">364</context>
+=======
+          <context context-type="linenumber">371</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">493</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="883965278435032344" datatype="html">
@@ -7178,7 +7475,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">385</context>
+=======
+          <context context-type="linenumber">393</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">515</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3542042671420335679" datatype="html">
@@ -7189,7 +7494,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">385</context>
+=======
+          <context context-type="linenumber">394</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">516</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="872092479747931526" datatype="html">
@@ -7374,11 +7687,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">26</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">34</context>
+=======
+          <context context-type="linenumber">28</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2266163016683537825" datatype="html">
@@ -7500,7 +7817,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">215</context>
+=======
+          <context context-type="linenumber">239</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">538</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.ts</context>
@@ -7508,18 +7833,127 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">30</context>
+          <context context-type="linenumber">39</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">90</context>
+          <context context-type="linenumber">99</context>
         </context-group>
       </trans-unit>
       <trans-unit id="5114742157723900905" datatype="html">
         <source>Date created</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">167</context>
+=======
+          <context context-type="linenumber">128</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2691296884221415710" datatype="html">
+        <source>Correspondent</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
+          <context context-type="linenumber">130</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.html</context>
+          <context context-type="linenumber">19</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">535</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">158</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.html</context>
+          <context context-type="linenumber">50</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">51</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">55</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">98</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5066119607229701477" datatype="html">
+        <source>Document type</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
+          <context context-type="linenumber">132</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.html</context>
+          <context context-type="linenumber">33</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">552</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">159</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.html</context>
+          <context context-type="linenumber">61</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">52</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">59</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">100</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2091353339965748767" datatype="html">
+        <source>Storage path</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
+          <context context-type="linenumber">134</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.html</context>
+          <context context-type="linenumber">47</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">556</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">157</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.html</context>
+          <context context-type="linenumber">72</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">50</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">63</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/document.ts</context>
+          <context context-type="linenumber">101</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="5607669932062416162" datatype="html">
@@ -8522,7 +8956,15 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">333</context>
+=======
+          <context context-type="linenumber">335</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">457</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="106713086593101376" datatype="html">
@@ -8599,8 +9041,12 @@
           <context context-type="linenumber">125</context>
         </context-group>
         <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">568</context>
+        </context-group>
+        <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">66</context>
+          <context context-type="linenumber">75</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/pipes/username.pipe.ts</context>
@@ -8661,17 +9107,22 @@
         <source>Select none</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">10</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">17</context>
+=======
+          <context context-type="linenumber">12</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1512866475468373520" datatype="html">
         <source>Select page</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">11</context>
         </context-group>
         <context-group purpose="location">
@@ -8681,12 +9132,20 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">18</context>
+=======
+          <context context-type="linenumber">13</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">725</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1494518490116523821" datatype="html">
         <source>Select all</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">12</context>
         </context-group>
         <context-group purpose="location">
@@ -8696,23 +9155,35 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">19</context>
+=======
+          <context context-type="linenumber">14</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">718</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6857598786757174736" datatype="html">
         <source>Select:</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">17</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/document-attributes.component.html</context>
           <context context-type="linenumber">25</context>
+=======
+          <context context-type="linenumber">19</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6252070156626006029" datatype="html">
         <source>None</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">22</context>
         </context-group>
         <context-group purpose="location">
@@ -8722,6 +9193,21 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/document-attributes/management-list/management-list.component.ts</context>
           <context context-type="linenumber">132</context>
+=======
+          <context context-type="linenumber">24</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">156</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">126</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">49</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/matching-model.ts</context>
@@ -8732,63 +9218,121 @@
         <source>Sort</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">65</context>
+=======
+          <context context-type="linenumber">73</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8623978917681527907" datatype="html">
+        <source>Group</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">99</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="7118963917562742579" datatype="html">
+        <source>Expand all</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">110</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8949980368324060194" datatype="html">
+        <source>Collapse all</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">112</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2123659921722214537" datatype="html">
         <source>Views</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">90</context>
+=======
+          <context context-type="linenumber">120</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1233494216161906927" datatype="html">
         <source>Save &quot;<x id="INTERPOLATION" equiv-text="{{list.activeSavedViewTitle}}"/>&quot;</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">108</context>
+=======
+          <context context-type="linenumber">140,141</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2276119452079372898" datatype="html">
         <source>Save as...</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">110</context>
+=======
+          <context context-type="linenumber">145</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1450797155766668235" datatype="html">
         <source>All saved views</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">111</context>
+=======
+          <context context-type="linenumber">147,148</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
-      <trans-unit id="8786996283897742947" datatype="html">
-        <source>{VAR_PLURAL, plural, =1 {Selected <x id="INTERPOLATION"/> of one document} other {Selected <x id="INTERPOLATION"/> of <x id="INTERPOLATION_1"/> documents}}</source>
+      <trans-unit id="623452713261330323" datatype="html">
+        <source>{VAR_PLURAL, plural, =1 {Selected <x id="INTERPOLATION"/> of one document} other {Selected
+        <x id="INTERPOLATION"/> of <x id="INTERPOLATION_1"/> documents}}</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">131</context>
+=======
+          <context context-type="linenumber">170,171</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6600548268163632449" datatype="html">
         <source>{VAR_PLURAL, plural, =1 {One document} other {<x id="INTERPOLATION"/> documents}}</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">135</context>
+=======
+          <context context-type="linenumber">175</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2243770355958919528" datatype="html">
         <source>(filtered)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">137</context>
+=======
+          <context context-type="linenumber">177</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6849725902312323996" datatype="html">
         <source>Reset filters</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">142</context>
+=======
+          <context context-type="linenumber">182</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.html</context>
@@ -8799,21 +9343,195 @@
         <source>Error while loading documents</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">163</context>
+=======
+          <context context-type="linenumber">203</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="494022736054110363" datatype="html">
         <source>Sort by ASN</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">192</context>
+=======
+          <context context-type="linenumber">226</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="1160542129605090661" datatype="html">
+        <source>ASN </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">227,228</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6954625430271090777" datatype="html">
+        <source>Sort by correspondent</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">232</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6946773634136972568" datatype="html">
+        <source> Correspondent</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">233,234</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2066713941761361709" datatype="html">
+        <source>Sort by title</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">237</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6232673011753681091" datatype="html">
+        <source>Sort by owner</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">246</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6458143961145916640" datatype="html">
+        <source>Owner </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">247,248</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="3557446856808034218" datatype="html">
+        <source>Sort by notes</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">251</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6895481799762150429" datatype="html">
+        <source>Notes </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">252,253</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5499001829734502606" datatype="html">
+        <source>Sort by document type</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">257</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8758259767322118452" datatype="html">
+        <source> Document type</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">258,259</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6213829731736042759" datatype="html">
+        <source>Sort by storage path</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">263</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8546551057963857977" datatype="html">
+        <source> Storage path</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">264,265</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="3406167410329973166" datatype="html">
+        <source>Sort by created date</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">268</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8669774534125074414" datatype="html">
+        <source> Created</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">269,270</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="3769035778779263084" datatype="html">
+        <source>Sort by added date</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">273</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6552510702788001335" datatype="html">
+        <source>Added </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">274,275</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="4874754501044009042" datatype="html">
+        <source>Sort by number of pages</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">278</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8524604975244804468" datatype="html">
+        <source>Pages </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">279,280</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="329406837759048287" datatype="html">
+        <source> Shared </source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">283,285</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5083658411133224968" datatype="html">
+        <source>Sort by <x id="INTERPOLATION" equiv-text="{{getDisplayCustomFieldTitle(field_id)}}"/></source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">288,289</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2179847500064178686" datatype="html">
+        <source>Edit document</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">325</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">447</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="3420321797707163677" datatype="html">
+        <source>Preview document</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">328</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+          <context context-type="linenumber">450</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="7517688192215738656" datatype="html">
         <source>ASN</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">196</context>
+=======
+          <context context-type="linenumber">531</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/filter-editor/filter-editor.component.ts</context>
@@ -8821,10 +9539,11 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">70</context>
+          <context context-type="linenumber">79</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">88</context>
         </context-group>
       </trans-unit>
@@ -8847,20 +9566,28 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">223</context>
+=======
+          <context context-type="linenumber">97</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3715596725146409911" datatype="html">
         <source>Owner</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">227</context>
+=======
+          <context context-type="linenumber">545</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">62</context>
+          <context context-type="linenumber">71</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">96</context>
         </context-group>
       </trans-unit>
@@ -8904,101 +9631,197 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">277</context>
+=======
+          <context context-type="linenumber">106</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3817498941817715969" datatype="html">
         <source>Pages</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
+<<<<<<< HEAD
           <context context-type="linenumber">281</context>
+=======
+          <context context-type="linenumber">565</context>
+>>>>>>> feat/group-list
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">74</context>
+          <context context-type="linenumber">83</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">97</context>
+          <context context-type="linenumber">107</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/paperless-config.ts</context>
           <context context-type="linenumber">104</context>
         </context-group>
       </trans-unit>
-      <trans-unit id="329406837759048287" datatype="html">
-        <source> Shared </source>
+      <trans-unit id="7681524183805703889" datatype="html">
+        <source>Created year</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">284,286</context>
+=======
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">160</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">53</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
-      <trans-unit id="5083658411133224968" datatype="html">
-        <source>Sort by <x id="INTERPOLATION" equiv-text="{{getDisplayCustomFieldTitle(field_id)}}"/></source>
+      <trans-unit id="5572337178777242634" datatype="html">
+        <source>Created month</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">291,292</context>
+=======
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">161</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+          <context context-type="linenumber">54</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
-      <trans-unit id="2179847500064178686" datatype="html">
-        <source>Edit document</source>
+      <trans-unit id="5040539649430180041" datatype="html">
+        <source>No storage path</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">325</context>
+=======
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">295</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">298</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
-      <trans-unit id="3420321797707163677" datatype="html">
-        <source>Preview document</source>
+      <trans-unit id="1364133575417095385" datatype="html">
+        <source>No correspondent</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
           <context context-type="linenumber">326</context>
+=======
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">305</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="7139496590456201821" datatype="html">
+        <source>No document type</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">311</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="1375158393289637367" datatype="html">
+        <source>No date</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">317</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">330</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="9169367680120922814" datatype="html">
+        <source>Root</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">336</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8184389061942339757" datatype="html">
+        <source>No value</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+          <context context-type="linenumber">583</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="4512084577073831437" datatype="html">
         <source>Reset filters / selection</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">326</context>
+=======
+          <context context-type="linenumber">706</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="4135055128446167640" datatype="html">
         <source>Open first [selected] document</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">354</context>
+=======
+          <context context-type="linenumber">734</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3629960544875360046" datatype="html">
         <source>Previous page</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">370</context>
+=======
+          <context context-type="linenumber">750</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3337301694210287595" datatype="html">
         <source>Next page</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">382</context>
+=======
+          <context context-type="linenumber">762</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="2155249406916744630" datatype="html">
         <source>View &quot;<x id="PH" equiv-text="this.list.activeSavedViewTitle"/>&quot; saved successfully.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">416</context>
+=======
+          <context context-type="linenumber">796</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="4646273665293421938" datatype="html">
         <source>Failed to save view &quot;<x id="PH" equiv-text="this.list.activeSavedViewTitle"/>&quot;.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">422</context>
+=======
+          <context context-type="linenumber">802</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="6837554170707123455" datatype="html">
         <source>View &quot;<x id="PH" equiv-text="savedView.name"/>&quot; created successfully.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">488</context>
         </context-group>
       </trans-unit>
@@ -9007,6 +9830,9 @@
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.ts</context>
           <context context-type="linenumber">494</context>
+=======
+          <context context-type="linenumber">849</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="739880801667335279" datatype="html">
@@ -9937,8 +10763,13 @@
           <context context-type="linenumber">346</context>
         </context-group>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
           <context context-type="linenumber">268</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">364</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="3501895737484542570" datatype="html">
@@ -9976,6 +10807,166 @@
           <context context-type="linenumber">72</context>
         </context-group>
       </trans-unit>
+<<<<<<< HEAD
+=======
+      <trans-unit id="4010735610815226758" datatype="html">
+        <source>Filter by:</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">20</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">20</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">20</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">20</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="1383365546483928780" datatype="html">
+        <source>Matching</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">39</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">39</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">39</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">39</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="1488347670280290838" datatype="html">
+        <source>Document count</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">40</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">40</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">40</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">40</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8095412801504464756" datatype="html">
+        <source>{VAR_PLURAL, plural, =1 {One <x id="INTERPOLATION"/>} other {<x id="INTERPOLATION_1"/> total <x id="INTERPOLATION_2"/>}}</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">67</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">67</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">67</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.html</context>
+          <context context-type="linenumber">67</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="810888510148304696" datatype="html">
+        <source>Automatic</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">124</context>
+        </context-group>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/data/matching-model.ts</context>
+          <context context-type="linenumber">15</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="211408744872436427" datatype="html">
+        <source>Successfully created <x id="PH" equiv-text="this.typeName"/>.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">211</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="3928835053823658072" datatype="html">
+        <source>Error occurred while creating <x id="PH" equiv-text="this.typeName"/>.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">216</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="4835942264662718903" datatype="html">
+        <source>Successfully updated <x id="PH" equiv-text="this.typeName"/> &quot;<x id="PH_1" equiv-text="object.name"/>&quot;.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">231</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6442673774206210733" datatype="html">
+        <source>Error occurred while saving <x id="PH" equiv-text="this.typeName"/>.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">236</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8371896857609524947" datatype="html">
+        <source>Associated documents will not be deleted.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">256</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6639207128255974941" datatype="html">
+        <source>Error while deleting element</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">272</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="4863024195229581844" datatype="html">
+        <source>Permissions updated successfully</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">357</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="2620006875434695386" datatype="html">
+        <source>This operation will permanently delete the selected <x id="PH" equiv-text="this.typeNamePlural"/>.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">378</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5897787932098828336" datatype="html">
+        <source>Objects deleted successfully</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">392</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="8273353839648035634" datatype="html">
+        <source>Error deleting objects</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
+          <context context-type="linenumber">398</context>
+        </context-group>
+      </trans-unit>
+>>>>>>> feat/group-list
       <trans-unit id="1930477323485553035" datatype="html">
         <source>Customize the views of your documents.</source>
         <context-group purpose="location">
@@ -10032,6 +11023,20 @@
           <context context-type="linenumber">62</context>
         </context-group>
       </trans-unit>
+      <trans-unit id="3653048554215358825" datatype="html">
+        <source>Group by</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.html</context>
+          <context context-type="linenumber">52</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="5724790775622934883" datatype="html">
+        <source>Note: ordering is not preserved</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.html</context>
+          <context context-type="linenumber">62</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="7877440816920439876" datatype="html">
         <source>No saved views defined.</source>
         <context-group purpose="location">
@@ -10043,28 +11048,80 @@
         <source>Saved view &quot;<x id="PH" equiv-text="savedView.name"/>&quot; deleted.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">153</context>
+=======
+          <context context-type="linenumber">143</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1660419335376265526" datatype="html">
         <source>Views saved successfully.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">230</context>
+=======
+          <context context-type="linenumber">168</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1699877326523238632" datatype="html">
         <source>Error while saving views.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
+<<<<<<< HEAD
           <context context-type="linenumber">235</context>
+=======
+          <context context-type="linenumber">173</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="4919025779187821586" datatype="html">
         <source>Note: Sharing saved views does not share the underlying documents.</source>
         <context-group purpose="location">
+<<<<<<< HEAD
           <context context-type="sourcefile">src/app/components/manage/saved-views/saved-views.component.ts</context>
           <context context-type="linenumber">257</context>
+=======
+          <context context-type="sourcefile">src/app/components/manage/storage-path-list/storage-path-list.component.ts</context>
+          <context context-type="linenumber">43</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="22235115124223314" datatype="html">
+        <source>storage paths</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/storage-path-list/storage-path-list.component.ts</context>
+          <context context-type="linenumber">44</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="1569070683025071137" datatype="html">
+        <source>Do you really want to delete the storage path &quot;<x id="PH" equiv-text="object.name"/>&quot;?</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/storage-path-list/storage-path-list.component.ts</context>
+          <context context-type="linenumber">60</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="6402703264596649214" datatype="html">
+        <source>tag</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/tag-list/tag-list.component.ts</context>
+          <context context-type="linenumber">44</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="4975748273657042999" datatype="html">
+        <source>tags</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/tag-list/tag-list.component.ts</context>
+          <context context-type="linenumber">45</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="93754014749412887" datatype="html">
+        <source>Do you really want to delete the tag &quot;<x id="PH" equiv-text="object.name"/>&quot;?</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/manage/tag-list/tag-list.component.ts</context>
+          <context context-type="linenumber">61</context>
+>>>>>>> feat/group-list
         </context-group>
       </trans-unit>
       <trans-unit id="1229748338333965418" datatype="html">
@@ -10309,7 +11366,7 @@
         <source>Search score</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/data/document.ts</context>
-          <context context-type="linenumber">103</context>
+          <context context-type="linenumber">113</context>
         </context-group>
         <note priority="1" from="description">Score is a value returned by the full text search engine and specifies how well a result matches the given query</note>
       </trans-unit>
