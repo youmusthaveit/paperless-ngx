@@ -9,6 +9,7 @@ import {
 } from '@angular/core'
 import {
   AbstractControl,
+  FormArray,
   FormControl,
   FormGroup,
   FormsModule,
@@ -29,6 +30,7 @@ import {
   timer,
 } from 'rxjs'
 import {
+  BackupScheduleJob,
   ConfigCategory,
   ConfigOption,
   ConfigOptionType,
@@ -100,6 +102,7 @@ export class ConfigComponent
   public s3StorageExports: Record<number, S3StorageExport[]> = {}
   public s3TransferTasks: Record<number, PaperlessTask> = {}
   public s3StorageSelectItems: Array<{ id: number; name: string }> = []
+  public backupJobsForm = new FormArray<FormGroup>([])
   private s3StorageModalRef: NgbModalRef | null = null
   private s3TransferPollingSubscriptions: Record<number, Subscription> = {}
   public s3StorageForm = new FormGroup({
@@ -143,10 +146,19 @@ export class ConfigComponent
   constructor() {
     super()
     this.configForm.addControl('id', new FormControl())
+    this.configForm.addControl(
+      'documents_backup_schedule_jobs',
+      new FormControl<BackupScheduleJob[]>([])
+    )
     PaperlessConfigOptions.forEach((option) => {
       this.configForm.addControl(option.key, new FormControl())
     })
     this.resetS3StorageForm()
+    this.backupJobsForm.valueChanges
+      .pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe((jobs) => {
+        this.setBackupScheduleJobsValue(jobs as BackupScheduleJob[])
+      })
   }
 
   ngOnInit(): void {
@@ -218,6 +230,7 @@ export class ConfigComponent
       this.isDirty$ = dirtyCheck(this.configForm, this.store.asObservable())
     }
     this.configForm.patchValue(config)
+    this.setBackupJobs(config.documents_backup_schedule_jobs ?? [])
 
     this.initialConfig = config
   }
@@ -267,6 +280,7 @@ export class ConfigComponent
 
   public discardChanges() {
     this.configForm.reset(this.initialConfig)
+    this.setBackupJobs(this.initialConfig?.documents_backup_schedule_jobs ?? [])
   }
 
   public uploadFile(file: File, key: string) {
@@ -298,6 +312,65 @@ export class ConfigComponent
 
   public resetOption(key: string) {
     this.configForm.get(key).setValue(null)
+  }
+
+  get backupJobControls(): FormGroup[] {
+    return this.backupJobsForm.controls as FormGroup[]
+  }
+
+  private createBackupJobForm(job?: Partial<BackupScheduleJob>): FormGroup {
+    return new FormGroup({
+      name: new FormControl(job?.name ?? ''),
+      enabled: new FormControl(job?.enabled ?? true),
+      storage: new FormControl<number | null>(job?.storage ?? null),
+      frequency_days: new FormControl<number | null>(job?.frequency_days ?? 1),
+      hour: new FormControl<number | null>(job?.hour ?? 2),
+      minute: new FormControl<number | null>(job?.minute ?? 0),
+      retain_count: new FormControl<number | null>(job?.retain_count ?? 7),
+      last_run: new FormControl<string | null>(job?.last_run ?? null),
+    })
+  }
+
+  private setBackupJobs(jobs: BackupScheduleJob[]) {
+    while (this.backupJobsForm.length > 0) {
+      this.backupJobsForm.removeAt(0, { emitEvent: false })
+    }
+    jobs.forEach((job) => {
+      this.backupJobsForm.push(this.createBackupJobForm(job))
+    })
+    this.setBackupScheduleJobsValue(jobs, false)
+  }
+
+  public addBackupJob() {
+    let nextIndex = this.backupJobsForm.length + 1
+    this.backupJobsForm.push(
+      this.createBackupJobForm({
+        name: $localize`Backup Job ${nextIndex}`,
+      })
+    )
+  }
+
+  public removeBackupJob(index: number) {
+    this.backupJobsForm.removeAt(index)
+  }
+
+  public formatBackupLastRun(value: string | null | undefined): string {
+    if (!value) return $localize`Never`
+    return new Date(value).toLocaleString()
+  }
+
+  public formatS3ExportSizeMb(size: number | null | undefined): string {
+    if (size == null || Number.isNaN(size)) return '?'
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  private setBackupScheduleJobsValue(
+    jobs: BackupScheduleJob[],
+    emitEvent = true
+  ) {
+    ;(this.configForm.controls as Record<string, FormControl<any>>)[
+      'documents_backup_schedule_jobs'
+    ]?.setValue(jobs, { emitEvent })
   }
 
   public isS3StorageSelected(): boolean {
@@ -443,6 +516,11 @@ export class ConfigComponent
               .get('documents_backup_s3_storage')
               ?.setValue(null as never)
           }
+          this.backupJobControls.forEach((job) => {
+            if (job.get('storage')?.value === storage.id) {
+              job.get('storage')?.setValue(null)
+            }
+          })
           if (this.s3StorageForm.get('id')?.value === storage.id) {
             this.resetS3StorageForm()
           }

@@ -87,6 +87,14 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "documents_backup_s3_addressing_style": None,
                 "documents_backup_s3_querystring_auth": None,
                 "documents_backup_s3_use_ssl": None,
+                "documents_backup_schedule_enabled": None,
+                "documents_backup_schedule_storage": None,
+                "documents_backup_schedule_frequency_days": None,
+                "documents_backup_schedule_hour": None,
+                "documents_backup_schedule_minute": None,
+                "documents_backup_schedule_retain_count": None,
+                "documents_backup_schedule_last_run": None,
+                "documents_backup_schedule_jobs": [],
                 "barcodes_enabled": None,
                 "barcode_enable_tiff_support": None,
                 "barcode_string": None,
@@ -270,6 +278,70 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(
             config.documents_backup_s3_secret_access_key,
             "keep-backup-secret",
+        )
+
+    def test_api_update_automatic_backup_jobs(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Scheduled Backup",
+            bucket="scheduled-bucket",
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_schedule_jobs": [
+                        {
+                            "name": "Nightly",
+                            "enabled": True,
+                            "storage": selected_storage.pk,
+                            "frequency_days": 1,
+                            "hour": 2,
+                            "minute": 15,
+                            "retain_count": 7,
+                            "last_run": None,
+                        },
+                        {
+                            "name": "Weekly",
+                            "enabled": False,
+                            "storage": selected_storage.pk,
+                            "frequency_days": 7,
+                            "hour": 5,
+                            "minute": 0,
+                            "retain_count": 4,
+                            "last_run": None,
+                        },
+                    ],
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(
+            config.documents_backup_schedule_jobs,
+            [
+                {
+                    "name": "Nightly",
+                    "enabled": True,
+                    "storage": selected_storage.pk,
+                    "frequency_days": 1,
+                    "hour": 2,
+                    "minute": 15,
+                    "retain_count": 7,
+                    "last_run": None,
+                },
+                {
+                    "name": "Weekly",
+                    "enabled": False,
+                    "storage": selected_storage.pk,
+                    "frequency_days": 7,
+                    "hour": 5,
+                    "minute": 0,
+                    "retain_count": 4,
+                    "last_run": None,
+                },
+            ],
         )
 
     @mock.patch("paperless.views.test_document_storage_connection")
@@ -1146,8 +1218,8 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         storage_backend.get_modified_time.side_effect = [modified, modified]
 
         with mock.patch(
-            "paperless.views.get_s3_configuration_storage",
-            return_value=storage_backend,
+            "paperless.views.S3StorageConfigurationViewSet._get_export_storage_candidates",
+            return_value=[("manual-transfer", storage_backend)],
         ):
             response = self.client.get(f"{self.ENDPOINT}{storage.pk}/exports/")
 
@@ -1158,6 +1230,52 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             "paperless-manual-export-20260327T120000Z.zip",
         )
         self.assertEqual(response.data[0]["size"], 456)
+
+    def test_api_list_named_s3_exports_includes_automatic_exports(self):
+        modified = "2026-03-27T12:34:56Z"
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        manual_storage_backend = mock.Mock()
+        manual_storage_backend.listdir.return_value = (
+            [],
+            ["paperless-manual-export-20260327T120000Z.zip"],
+        )
+        manual_storage_backend.size.return_value = 123
+        manual_storage_backend.get_modified_time.return_value = modified
+
+        automatic_storage_backend = mock.Mock()
+        automatic_storage_backend.listdir.side_effect = [
+            (["2026-03-27"], []),
+            ([], ["paperless-automatic-export-20260327T120000Z.zip"]),
+        ]
+        automatic_storage_backend.size.return_value = 456
+        automatic_storage_backend.get_modified_time.return_value = modified
+
+        with mock.patch(
+            "paperless.views.S3StorageConfigurationViewSet._get_export_storage_candidates",
+            return_value=[
+                ("manual-transfer", manual_storage_backend),
+                ("automatic-transfer", automatic_storage_backend),
+            ],
+        ):
+            response = self.client.get(f"{self.ENDPOINT}{storage.pk}/exports/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data[0]["name"],
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        self.assertEqual(
+            response.data[1]["name"],
+            "2026-03-27/paperless-automatic-export-20260327T120000Z.zip",
+        )
 
     def test_api_download_named_s3_export(self):
         storage = S3StorageConfiguration.objects.create(
@@ -1190,6 +1308,43 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response["Content-Type"], "application/zip")
         self.assertIn(
             'filename="paperless-manual-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")
+
+    def test_api_download_automatic_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+        storage_backend.open.return_value = BytesIO(b"zip-content")
+
+        with mock.patch(
+            "paperless.views.S3StorageConfigurationViewSet._get_storage_backend_for_export",
+            return_value=storage_backend,
+        ):
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/download-export/",
+                json.dumps(
+                    {
+                        "export_name": (
+                            "2026-03-27/paperless-automatic-export-20260327T120000Z.zip"
+                        ),
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-automatic-export-20260327T120000Z.zip"',
             response["Content-Disposition"],
         )
         self.assertEqual(b"".join(response.streaming_content), b"zip-content")

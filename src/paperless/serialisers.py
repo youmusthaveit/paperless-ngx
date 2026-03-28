@@ -207,6 +207,10 @@ class ProfileSerializer(PasswordValidationMixin, serializers.ModelSerializer):
 class ApplicationConfigurationSerializer(serializers.ModelSerializer):
     user_args = serializers.JSONField(binary=True, allow_null=True)
     barcode_tag_mapping = serializers.JSONField(binary=True, allow_null=True)
+    documents_backup_schedule_jobs = serializers.JSONField(
+        required=False,
+        allow_null=True,
+    )
     documents_s3_secret_access_key = ObfuscatedPasswordField(
         required=False,
         allow_null=True,
@@ -275,6 +279,88 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
         if file and magic.from_buffer(file.read(2048), mime=True) == "image/svg+xml":
             reject_dangerous_svg(file)
         return file
+
+    def validate_documents_backup_schedule_jobs(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Expected a list of backup jobs.")
+
+        validated_jobs = []
+        seen_names = set()
+        for index, job in enumerate(value):
+            if not isinstance(job, dict):
+                raise serializers.ValidationError(
+                    f"Backup job at index {index} must be an object.",
+                )
+
+            name = job.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise serializers.ValidationError(
+                    f'Backup job at index {index} requires a non-empty "name".',
+                )
+            name = name.strip()
+            if name in seen_names:
+                raise serializers.ValidationError(
+                    f'Backup job name "{name}" is duplicated.',
+                )
+            seen_names.add(name)
+
+            enabled = bool(job.get("enabled", True))
+            storage = job.get("storage")
+            frequency_days = job.get("frequency_days")
+            hour = job.get("hour")
+            minute = job.get("minute")
+            retain_count = job.get("retain_count")
+            last_run = job.get("last_run")
+
+            if storage is not None and not isinstance(storage, int):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" has an invalid "storage" value.',
+                )
+            if frequency_days is not None and (
+                not isinstance(frequency_days, int) or frequency_days < 1
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "frequency_days" >= 1.',
+                )
+            if hour is not None and (
+                not isinstance(hour, int) or hour < 0 or hour > 23
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "hour" between 0 and 23.',
+                )
+            if minute is not None and (
+                not isinstance(minute, int) or minute < 0 or minute > 59
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "minute" between 0 and 59.',
+                )
+            if retain_count is not None and (
+                not isinstance(retain_count, int) or retain_count < 1
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "retain_count" >= 1.',
+                )
+            if last_run is not None and not isinstance(last_run, str):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" has an invalid "last_run" value.',
+                )
+
+            validated_jobs.append(
+                {
+                    "name": name,
+                    "enabled": enabled,
+                    "storage": storage,
+                    "frequency_days": frequency_days,
+                    "hour": hour,
+                    "minute": minute,
+                    "retain_count": retain_count,
+                    "last_run": last_run,
+                },
+            )
+
+        return validated_jobs
 
     class Meta:
         model = ApplicationConfiguration

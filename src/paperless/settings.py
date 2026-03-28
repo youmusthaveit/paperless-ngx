@@ -237,6 +237,16 @@ def _parse_beat_schedule() -> dict:
                 "expires": 59.0 * 60.0,
             },
         },
+        {
+            "name": "Check automatic S3 backups",
+            "env_key": "PAPERLESS_AUTO_BACKUP_CHECK_TASK_CRON",
+            # Default every 15 minutes
+            "env_default": "*/15 * * * *",
+            "task": "documents.tasks.run_scheduled_s3_backup_exports",
+            "options": {
+                "expires": 14.0 * 60.0,
+            },
+        },
     ]
     for task in tasks:
         # Either get the environment setting or use the default

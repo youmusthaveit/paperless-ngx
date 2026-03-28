@@ -80,6 +80,17 @@ function mapToItems(
   })
 }
 
+export interface BackupScheduleJob {
+  name: string
+  enabled: boolean
+  storage: number | null
+  frequency_days: number | null
+  hour: number | null
+  minute: number | null
+  retain_count: number | null
+  last_run?: string | null
+}
+
 export const PaperlessConfigOptions: ConfigOption[] = [
   {
     key: 'output_type',
@@ -326,6 +337,7 @@ export interface PaperlessConfig extends ObjectWithId {
   documents_s3_use_ssl: boolean
   documents_backup_prefix: string
   documents_backup_s3_storage: number
+  documents_backup_schedule_jobs: BackupScheduleJob[]
   documents_backup_s3_bucket: string
   documents_backup_s3_endpoint_url: string
   documents_backup_s3_access_key_id: string

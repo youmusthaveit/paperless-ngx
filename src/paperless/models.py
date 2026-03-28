@@ -1,4 +1,5 @@
 from django.core.validators import FileExtensionValidator
+from django.core.validators import MaxValueValidator
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -471,6 +472,61 @@ class ApplicationConfiguration(AbstractSingletonModel):
     documents_backup_s3_use_ssl = models.BooleanField(
         verbose_name=_("Sets whether S3 backup uses SSL"),
         null=True,
+    )
+
+    documents_backup_schedule_enabled = models.BooleanField(
+        verbose_name=_("Enables automatic full backups"),
+        null=True,
+    )
+
+    documents_backup_schedule_storage = models.ForeignKey(
+        S3StorageConfiguration,
+        verbose_name=_("Selects the S3 storage for automatic full backups"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="automatic_backup_configs",
+    )
+
+    documents_backup_schedule_frequency_days = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup interval in days"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
+
+    documents_backup_schedule_hour = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup hour"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(23)],
+    )
+
+    documents_backup_schedule_minute = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup minute"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(59)],
+    )
+
+    documents_backup_schedule_retain_count = models.PositiveIntegerField(
+        verbose_name=_("Sets how many automatic backups are retained"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
+
+    documents_backup_schedule_last_run = models.DateTimeField(
+        verbose_name=_("Tracks the last automatic backup run"),
+        null=True,
+        blank=True,
+    )
+
+    documents_backup_schedule_jobs = models.JSONField(
+        verbose_name=_("Stores automatic backup job definitions"),
+        null=True,
+        blank=True,
+        default=list,
     )
 
     """

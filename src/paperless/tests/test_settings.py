@@ -160,6 +160,7 @@ class TestCeleryScheduleParsing(TestCase):
     SANITY_EXPIRE_TIME = ((7.0 * 24.0) - 1.0) * 60.0 * 60.0
     EMPTY_TRASH_EXPIRE_TIME = 23.0 * 60.0 * 60.0
     RUN_SCHEDULED_WORKFLOWS_EXPIRE_TIME = 59.0 * 60.0
+    AUTO_BACKUP_CHECK_EXPIRE_TIME = 14.0 * 60.0
 
     def test_schedule_configuration_default(self):
         """
@@ -203,6 +204,11 @@ class TestCeleryScheduleParsing(TestCase):
                     "task": "documents.tasks.check_scheduled_workflows",
                     "schedule": crontab(minute="5", hour="*/1"),
                     "options": {"expires": self.RUN_SCHEDULED_WORKFLOWS_EXPIRE_TIME},
+                },
+                "Check automatic S3 backups": {
+                    "task": "documents.tasks.run_scheduled_s3_backup_exports",
+                    "schedule": crontab(minute="*/15"),
+                    "options": {"expires": self.AUTO_BACKUP_CHECK_EXPIRE_TIME},
                 },
             },
             schedule,
@@ -256,6 +262,11 @@ class TestCeleryScheduleParsing(TestCase):
                     "schedule": crontab(minute="5", hour="*/1"),
                     "options": {"expires": self.RUN_SCHEDULED_WORKFLOWS_EXPIRE_TIME},
                 },
+                "Check automatic S3 backups": {
+                    "task": "documents.tasks.run_scheduled_s3_backup_exports",
+                    "schedule": crontab(minute="*/15"),
+                    "options": {"expires": self.AUTO_BACKUP_CHECK_EXPIRE_TIME},
+                },
             },
             schedule,
         )
@@ -300,6 +311,11 @@ class TestCeleryScheduleParsing(TestCase):
                     "schedule": crontab(minute="5", hour="*/1"),
                     "options": {"expires": self.RUN_SCHEDULED_WORKFLOWS_EXPIRE_TIME},
                 },
+                "Check automatic S3 backups": {
+                    "task": "documents.tasks.run_scheduled_s3_backup_exports",
+                    "schedule": crontab(minute="*/15"),
+                    "options": {"expires": self.AUTO_BACKUP_CHECK_EXPIRE_TIME},
+                },
             },
             schedule,
         )
@@ -322,6 +338,7 @@ class TestCeleryScheduleParsing(TestCase):
                 "PAPERLESS_INDEX_TASK_CRON": "disable",
                 "PAPERLESS_EMPTY_TRASH_TASK_CRON": "disable",
                 "PAPERLESS_WORKFLOW_SCHEDULED_TASK_CRON": "disable",
+                "PAPERLESS_AUTO_BACKUP_CHECK_TASK_CRON": "disable",
             },
         ):
             schedule = _parse_beat_schedule()

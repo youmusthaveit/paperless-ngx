@@ -48,6 +48,8 @@ from documents.storage import get_s3_configuration_storage
 from documents.storage import test_document_backup_storage_connection
 from documents.storage import test_document_storage_connection
 from documents.storage import test_s3_connection
+from documents.tasks import AUTOMATIC_S3_TRANSFER_LOCATION
+from documents.tasks import MANUAL_S3_TRANSFER_LOCATION
 from documents.tasks import build_manual_s3_export_filename
 from documents.tasks import export_documents_to_s3_storage
 from documents.tasks import import_documents_from_s3_storage
@@ -324,30 +326,73 @@ class S3StorageConfigurationViewSet(ModelViewSet):
     def _validate_export_name(export_name: object) -> str:
         if not isinstance(export_name, str) or not export_name:
             raise ValidationError({"export_name": "This field is required."})
-        if Path(export_name).name != export_name or not export_name.endswith(".zip"):
+        export_path = Path(export_name)
+        if (
+            export_path.is_absolute()
+            or ".." in export_path.parts
+            or export_path.name != export_path.parts[-1]
+            or not export_name.endswith(".zip")
+        ):
             raise ValidationError({"export_name": "Invalid export name."})
         return export_name
+
+    @staticmethod
+    def _list_export_names(storage_backend, path: str = ""):
+        directories, filenames = storage_backend.listdir(path)
+        exports = [f"{path}/{filename}" if path else filename for filename in filenames]
+        for directory in directories:
+            nested_path = f"{path}/{directory}" if path else directory
+            exports.extend(
+                S3StorageConfigurationViewSet._list_export_names(
+                    storage_backend,
+                    nested_path,
+                ),
+            )
+        return exports
+
+    @staticmethod
+    def _get_export_storage_candidates(storage):
+        return [
+            (
+                MANUAL_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage,
+                    location=MANUAL_S3_TRANSFER_LOCATION,
+                ),
+            ),
+            (
+                AUTOMATIC_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage,
+                    location=AUTOMATIC_S3_TRANSFER_LOCATION,
+                ),
+            ),
+        ]
+
+    @classmethod
+    def _get_storage_backend_for_export(cls, storage, export_name: str):
+        for _, storage_backend in cls._get_export_storage_candidates(storage):
+            if storage_backend.exists(export_name):
+                return storage_backend
+        raise ValidationError({"export_name": "Export not found."})
 
     @action(detail=True, methods=["get"], url_path="exports")
     def list_exports(self, request, pk=None):
         storage = self.get_object()
-        storage_backend = get_s3_configuration_storage(
-            storage,
-            location="manual-transfer",
-        )
         try:
-            _, filenames = storage_backend.listdir("")
             exports = []
-            for filename in sorted(filenames, reverse=True):
-                if not filename.endswith(".zip"):
-                    continue
-                exports.append(
-                    {
-                        "name": filename,
-                        "size": storage_backend.size(filename),
-                        "modified": storage_backend.get_modified_time(filename),
-                    },
-                )
+            for _, storage_backend in self._get_export_storage_candidates(storage):
+                for filename in self._list_export_names(storage_backend):
+                    if not filename.endswith(".zip"):
+                        continue
+                    exports.append(
+                        {
+                            "name": filename,
+                            "size": storage_backend.size(filename),
+                            "modified": storage_backend.get_modified_time(filename),
+                        },
+                    )
+            exports.sort(key=lambda export: export["name"], reverse=True)
         except Exception as exc:
             raise ValidationError(
                 {"detail": f'Unable to list exports for "{storage.name}": {exc}'},
@@ -362,19 +407,12 @@ class S3StorageConfigurationViewSet(ModelViewSet):
 
         storage = self.get_object()
         export_name = self._validate_export_name(request.data.get("export_name"))
-
-        storage_backend = get_s3_configuration_storage(
-            storage,
-            location="manual-transfer",
-        )
         try:
-            if not storage_backend.exists(export_name):
-                raise ValidationError({"export_name": "Export not found."})
-
+            storage_backend = self._get_storage_backend_for_export(storage, export_name)
             return FileResponse(
                 storage_backend.open(export_name, "rb"),
                 as_attachment=True,
-                filename=export_name,
+                filename=Path(export_name).name,
                 content_type="application/zip",
             )
         except ValidationError:
@@ -391,15 +429,8 @@ class S3StorageConfigurationViewSet(ModelViewSet):
 
         storage = self.get_object()
         export_name = self._validate_export_name(request.data.get("export_name"))
-
-        storage_backend = get_s3_configuration_storage(
-            storage,
-            location="manual-transfer",
-        )
         try:
-            if not storage_backend.exists(export_name):
-                raise ValidationError({"export_name": "Export not found."})
-
+            storage_backend = self._get_storage_backend_for_export(storage, export_name)
             storage_backend.delete(export_name)
         except ValidationError:
             raise
