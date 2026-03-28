@@ -1,7 +1,10 @@
 import { HttpEventType } from '@angular/common/http'
 import { Injectable, inject } from '@angular/core'
-import { Subscription } from 'rxjs'
+import { Subscription, timer } from 'rxjs'
+import { switchMap } from 'rxjs/operators'
+import { PaperlessTaskStatus } from '../data/paperless-task'
 import { DocumentService } from './rest/document.service'
+import { TasksService } from './tasks.service'
 import {
   FileStatusPhase,
   WebsocketStatusService,
@@ -13,8 +16,10 @@ import {
 export class UploadDocumentsService {
   private documentService = inject(DocumentService)
   private websocketStatusService = inject(WebsocketStatusService)
+  private tasksService = inject(TasksService)
 
-  private uploadSubscriptions: Array<Subscription> = []
+  private uploadSubscriptions: Record<string, Subscription> = {}
+  private taskPollingSubscriptions: Record<string, Subscription> = {}
 
   public uploadFile(file: File) {
     let formData = new FormData()
@@ -38,7 +43,8 @@ export class UploadDocumentsService {
           } else if (event.type == HttpEventType.Response) {
             status.taskId = event.body['task_id'] ?? event.body.toString()
             status.message = $localize`Upload complete, waiting...`
-            this.uploadSubscriptions[file.name]?.complete()
+            this.startTaskPolling(status.taskId)
+            this.stopUploadSubscription(file.name)
           }
         },
         error: (error) => {
@@ -55,8 +61,49 @@ export class UploadDocumentsService {
               break
             }
           }
-          this.uploadSubscriptions[file.name]?.complete()
+          this.stopUploadSubscription(file.name)
         },
       })
+  }
+
+  private stopUploadSubscription(fileName: string) {
+    this.uploadSubscriptions[fileName]?.unsubscribe()
+    delete this.uploadSubscriptions[fileName]
+  }
+
+  private startTaskPolling(taskId: string) {
+    this.taskPollingSubscriptions[taskId]?.unsubscribe()
+    this.taskPollingSubscriptions[taskId] = timer(1000, 2000)
+      .pipe(switchMap(() => this.tasksService.getByTaskId(taskId)))
+      .subscribe({
+        next: (tasks) => {
+          const task = tasks?.[0]
+          if (!task) {
+            return
+          }
+
+          if (task.status === PaperlessTaskStatus.Complete) {
+            this.websocketStatusService.completeTask(
+              taskId,
+              task.related_document
+            )
+            this.stopTaskPolling(taskId)
+          } else if (task.status === PaperlessTaskStatus.Failed) {
+            this.websocketStatusService.failTask(
+              taskId,
+              task.result ?? $localize`Unknown error`
+            )
+            this.stopTaskPolling(taskId)
+          }
+        },
+        error: () => {
+          // Keep the upload status in place and retry on the next interval.
+        },
+      })
+  }
+
+  private stopTaskPolling(taskId: string) {
+    this.taskPollingSubscriptions[taskId]?.unsubscribe()
+    delete this.taskPollingSubscriptions[taskId]
   }
 }

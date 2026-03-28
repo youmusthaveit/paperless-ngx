@@ -144,6 +144,16 @@ def parse_beat_schedule() -> dict:
             },
         },
         {
+            "name": "Check automatic S3 backups",
+            "env_key": "PAPERLESS_AUTO_BACKUP_CHECK_TASK_CRON",
+            # Default every 15 minutes
+            "env_default": "*/15 * * * *",
+            "task": "documents.tasks.run_scheduled_s3_backup_exports",
+            "options": {
+                "expires": 14.0 * 60.0,
+            },
+        },
+        {
             "name": "Rebuild LLM index",
             "env_key": "PAPERLESS_LLM_INDEX_TASK_CRON",
             # Default daily at 02:10

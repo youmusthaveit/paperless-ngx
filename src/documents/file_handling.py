@@ -4,6 +4,8 @@ from pathlib import Path
 from django.conf import settings
 
 from documents.models import Document
+from documents.storage import delete_empty_document_directories
+from documents.storage import document_exists
 from documents.templating.filepath import validate_filepath_template_and_render
 from documents.templating.utils import convert_format_str_to_template_format
 
@@ -13,6 +15,18 @@ def create_source_path_directory(source_path: Path) -> None:
 
 
 def delete_empty_directories(directory: Path, root: Path) -> None:
+    if root == settings.ORIGINALS_DIR:
+        delete_empty_document_directories(
+            "originals",
+            str(directory.relative_to(root)) if directory != root else None,
+        )
+        return
+    if root == settings.ARCHIVE_DIR:
+        delete_empty_document_directories(
+            "archive",
+            str(directory.relative_to(root)) if directory != root else None,
+        )
+        return
     if not directory.is_dir():
         return
 
@@ -57,10 +71,10 @@ def generate_unique_filename(doc, *, archive_filename=False) -> Path:
         old_filename: Path | None = (
             Path(doc.archive_filename) if doc.archive_filename else None
         )
-        root = settings.ARCHIVE_DIR
+        storage_kind = "archive"
     else:
         old_filename = Path(doc.filename) if doc.filename else None
-        root = settings.ORIGINALS_DIR
+        storage_kind = "originals"
 
     # If generating archive filenames, try to make a name that is similar to
     # the original filename first.
@@ -78,7 +92,10 @@ def generate_unique_filename(doc, *, archive_filename=False) -> Path:
             # No directory structure
             simple_pdf_name = Path(Path(doc.filename).stem + ".pdf")
 
-        if simple_pdf_name == old_filename or not (root / simple_pdf_name).exists():
+        if simple_pdf_name == old_filename or not document_exists(
+            storage_kind,
+            str(simple_pdf_name),
+        ):
             return simple_pdf_name
 
     counter = 0
@@ -93,7 +110,7 @@ def generate_unique_filename(doc, *, archive_filename=False) -> Path:
             # still the same as before.
             return new_filename
 
-        if (root / new_filename).exists():
+        if document_exists(storage_kind, str(new_filename)):
             counter += 1
         else:
             return new_filename

@@ -3,10 +3,11 @@ import json
 import os
 import shutil
 import tempfile
-from itertools import islice
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import tqdm
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount.models import SocialAccount
 from allauth.socialaccount.models import SocialApp
@@ -17,8 +18,8 @@ from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core import serializers
+from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
-from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.utils import timezone
 from filelock import FileLock
@@ -26,16 +27,15 @@ from guardian.models import GroupObjectPermission
 from guardian.models import UserObjectPermission
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from django.db.models import QuerySet
 
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
 
+from paperless.db import GnuPG
+
 from documents.file_handling import delete_empty_directories
 from documents.file_handling import generate_filename
-from documents.management.commands.base import PaperlessCommand
 from documents.management.commands.mixins import CryptMixin
 from documents.models import Correspondent
 from documents.models import CustomField
@@ -56,7 +56,6 @@ from documents.models import WorkflowTrigger
 from documents.settings import EXPORTER_ARCHIVE_NAME
 from documents.settings import EXPORTER_FILE_NAME
 from documents.settings import EXPORTER_THUMBNAIL_NAME
-from documents.utils import compute_checksum
 from documents.utils import copy_file_with_basic_stats
 from paperless import version
 from paperless.models import ApplicationConfiguration
@@ -64,115 +63,14 @@ from paperless_mail.models import MailAccount
 from paperless_mail.models import MailRule
 
 
-def serialize_queryset_batched(
-    queryset: "QuerySet",
-    *,
-    batch_size: int = 500,
-) -> "Generator[list[dict], None, None]":
-    """Yield batches of serialized records from a QuerySet.
-
-    Each batch is a list of dicts in Django's Python serialization format.
-    Uses QuerySet.iterator() to avoid loading the full queryset into memory,
-    and islice to collect chunk-sized batches serialized in a single call.
-    """
-    iterator = queryset.iterator(chunk_size=batch_size)
-    while chunk := list(islice(iterator, batch_size)):
-        yield serializers.serialize("python", chunk)
-
-
-class StreamingManifestWriter:
-    """Incrementally writes a JSON array to a file, one record at a time.
-
-    Writes to <target>.tmp first; on close(), optionally BLAKE2b-compares
-    with the existing file (--compare-json) and renames or discards accordingly.
-    On exception, discard() deletes the tmp file and leaves the original intact.
-    """
-
-    def __init__(
-        self,
-        path: Path,
-        *,
-        compare_json: bool = False,
-        files_in_export_dir: "set[Path] | None" = None,
-    ) -> None:
-        self._path = path.resolve()
-        self._tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
-        self._compare_json = compare_json
-        self._files_in_export_dir: set[Path] = (
-            files_in_export_dir if files_in_export_dir is not None else set()
-        )
-        self._file = None
-        self._first = True
-
-    def open(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self._tmp_path.open("w", encoding="utf-8")
-        self._file.write("[")
-        self._first = True
-
-    def write_record(self, record: dict) -> None:
-        if not self._first:
-            self._file.write(",\n")
-        else:
-            self._first = False
-        self._file.write(
-            json.dumps(record, cls=DjangoJSONEncoder, indent=2, ensure_ascii=False),
-        )
-
-    def write_batch(self, records: list[dict]) -> None:
-        for record in records:
-            self.write_record(record)
-
-    def close(self) -> None:
-        if self._file is None:
-            return
-        self._file.write("\n]")
-        self._file.close()
-        self._file = None
-        self._finalize()
-
-    def discard(self) -> None:
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        if self._tmp_path.exists():
-            self._tmp_path.unlink()
-
-    def _finalize(self) -> None:
-        """Compare with existing file (if --compare-json) then rename or discard tmp."""
-        if self._path in self._files_in_export_dir:
-            self._files_in_export_dir.remove(self._path)
-            if self._compare_json:
-                existing_hash = hashlib.blake2b(self._path.read_bytes()).hexdigest()
-                new_hash = hashlib.blake2b(self._tmp_path.read_bytes()).hexdigest()
-                if existing_hash == new_hash:
-                    self._tmp_path.unlink()
-                    return
-        self._tmp_path.rename(self._path)
-
-    def __enter__(self) -> "StreamingManifestWriter":
-        self.open()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if exc_type is not None:
-            self.discard()
-        else:
-            self.close()
-
-
-class Command(CryptMixin, PaperlessCommand):
+class Command(CryptMixin, BaseCommand):
     help = (
         "Decrypt and rename all files in our collection into a given target "
         "directory.  And include a manifest file containing document data for "
         "easy import."
     )
 
-    supports_progress_bar = True
-    supports_multiprocessing = False
-
-    def add_arguments(self, parser) -> None:
-        super().add_arguments(parser)
+    def add_arguments(self, parser):
         parser.add_argument("target")
 
         parser.add_argument(
@@ -280,22 +178,18 @@ class Command(CryptMixin, PaperlessCommand):
         )
 
         parser.add_argument(
+            "--no-progress-bar",
+            default=False,
+            action="store_true",
+            help="If set, the progress bar will not be shown",
+        )
+
+        parser.add_argument(
             "--passphrase",
             help="If provided, is used to encrypt sensitive data in the export",
         )
 
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=500,
-            help=(
-                "Number of records to process per batch during serialization. "
-                "Lower values reduce peak memory usage; higher values improve "
-                "throughput. Default: 500."
-            ),
-        )
-
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args, **options):
         self.target = Path(options["target"]).resolve()
         self.split_manifest: bool = options["split_manifest"]
         self.compare_checksums: bool = options["compare_checksums"]
@@ -307,8 +201,8 @@ class Command(CryptMixin, PaperlessCommand):
         self.no_thumbnail: bool = options["no_thumbnail"]
         self.zip_export: bool = options["zip"]
         self.data_only: bool = options["data_only"]
+        self.no_progress_bar: bool = options["no_progress_bar"]
         self.passphrase: str | None = options.get("passphrase")
-        self.batch_size: int = options["batch_size"]
 
         self.files_in_export_dir: set[Path] = set()
         self.exported_files: set[str] = set()
@@ -353,7 +247,7 @@ class Command(CryptMixin, PaperlessCommand):
             if self.zip_export and temp_dir is not None:
                 temp_dir.cleanup()
 
-    def dump(self) -> None:
+    def dump(self):
         # 1. Take a snapshot of what files exist in the current export folder
         for x in self.target.glob("**/*"):
             if x.is_file():
@@ -398,85 +292,93 @@ class Command(CryptMixin, PaperlessCommand):
         if settings.AUDIT_LOG_ENABLED:
             manifest_key_to_object_query["log_entries"] = LogEntry.objects.all()
 
-        # Crypto setup before streaming begins
-        if self.passphrase:
-            self.setup_crypto(passphrase=self.passphrase)
-        elif MailAccount.objects.count() > 0 or SocialToken.objects.count() > 0:
-            self.stdout.write(
-                self.style.NOTICE(
-                    "No passphrase was given, sensitive fields will be in plaintext",
-                ),
-            )
+        with transaction.atomic():
+            manifest_dict = {}
 
-        document_manifest: list[dict] = []
-        manifest_path = (self.target / "manifest.json").resolve()
-
-        with StreamingManifestWriter(
-            manifest_path,
-            compare_json=self.compare_json,
-            files_in_export_dir=self.files_in_export_dir,
-        ) as writer:
-            with transaction.atomic():
-                for key, qs in manifest_key_to_object_query.items():
-                    if key == "documents":
-                        # Accumulate for file-copy loop; written to manifest after
-                        for batch in serialize_queryset_batched(
-                            qs,
-                            batch_size=self.batch_size,
-                        ):
-                            for record in batch:
-                                self._encrypt_record_inline(record)
-                            document_manifest.extend(batch)
-                    elif self.split_manifest and key in (
-                        "notes",
-                        "custom_field_instances",
-                    ):
-                        # Written per-document in _write_split_manifest
-                        pass
-                    else:
-                        for batch in serialize_queryset_batched(
-                            qs,
-                            batch_size=self.batch_size,
-                        ):
-                            for record in batch:
-                                self._encrypt_record_inline(record)
-                            writer.write_batch(batch)
-
-            document_map: dict[int, Document] = {
-                d.pk: d for d in Document.objects.order_by("id")
-            }
-
-            # 3. Export files from each document
-            for index, document_dict in enumerate(
-                self.track(
-                    document_manifest,
-                    description="Exporting documents...",
-                    total=len(document_manifest),
-                ),
-            ):
-                document = document_map[document_dict["pk"]]
-
-                # 3.1. generate a unique filename
-                base_name = self.generate_base_name(document)
-
-                # 3.2. write filenames into manifest
-                original_target, thumbnail_target, archive_target = (
-                    self.generate_document_targets(document, base_name, document_dict)
+            # Build an overall manifest
+            for key, object_query in manifest_key_to_object_query.items():
+                manifest_dict[key] = json.loads(
+                    serializers.serialize("json", object_query),
                 )
 
-                # 3.3. write files to target folder
-                if not self.data_only:
-                    self.copy_document_files(
-                        document,
-                        original_target,
-                        thumbnail_target,
-                        archive_target,
-                    )
+            self.encrypt_secret_fields(manifest_dict)
 
-                if self.split_manifest:
-                    self._write_split_manifest(document_dict, document, base_name)
-                else:
-                    writer.write_record(document_dict)
+            # These are treated specially and included in the per-document manifest
+            # if that setting is enabled.  Otherwise, they are just exported to the bulk
+            # manifest
+            document_map: dict[int, Document] = {
+                d.pk: d for d in manifest_key_to_object_query["documents"]
+            }
+            document_manifest = manifest_dict["documents"]
+
+        # 3. Export files from each document
+        for index, document_dict in tqdm.tqdm(
+            enumerate(document_manifest),
+            total=len(document_manifest),
+            disable=self.no_progress_bar,
+        ):
+            # 3.1. store files unencrypted
+            document_dict["fields"]["storage_type"] = Document.STORAGE_TYPE_UNENCRYPTED
+
+            document = document_map[document_dict["pk"]]
+
+            # 3.2. generate a unique filename
+            base_name = self.generate_base_name(document)
+
+            # 3.3. write filenames into manifest
+            original_target, thumbnail_target, archive_target = (
+                self.generate_document_targets(document, base_name, document_dict)
+            )
+
+            # 3.4. write files to target folder
+            if not self.data_only:
+                self.copy_document_files(
+                    document,
+                    original_target,
+                    thumbnail_target,
+                    archive_target,
+                )
+
+            if self.split_manifest:
+                manifest_name = base_name.with_name(f"{base_name.stem}-manifest.json")
+                if self.use_folder_prefix:
+                    manifest_name = Path("json") / manifest_name
+                manifest_name = (self.target / manifest_name).resolve()
+                manifest_name.parent.mkdir(parents=True, exist_ok=True)
+                content = [document_manifest[index]]
+                content += list(
+                    filter(
+                        lambda d: d["fields"]["document"] == document_dict["pk"],
+                        manifest_dict["notes"],
+                    ),
+                )
+                content += list(
+                    filter(
+                        lambda d: d["fields"]["document"] == document_dict["pk"],
+                        manifest_dict["custom_field_instances"],
+                    ),
+                )
+
+                self.check_and_write_json(
+                    content,
+                    manifest_name,
+                )
+
+        # These were exported already
+        if self.split_manifest:
+            del manifest_dict["documents"]
+            del manifest_dict["notes"]
+            del manifest_dict["custom_field_instances"]
+
+        # 4.1 write primary manifest to target folder
+        manifest = []
+        for key, item in manifest_dict.items():
+            manifest.extend(item)
+        manifest_path = (self.target / "manifest.json").resolve()
+        self.check_and_write_json(
+            manifest,
+            manifest_path,
+        )
 
         # 4.2 write version information to target folder
         extra_metadata_path = (self.target / "metadata.json").resolve()
@@ -522,6 +424,7 @@ class Command(CryptMixin, PaperlessCommand):
                 base_name = generate_filename(
                     document,
                     counter=filename_counter,
+                    append_gpg=False,
                 )
             else:
                 base_name = document.get_public_filename(counter=filename_counter)
@@ -580,65 +483,50 @@ class Command(CryptMixin, PaperlessCommand):
 
         If the document is encrypted, the files are decrypted before copying them to the target location.
         """
-        self.check_and_copy(
-            document.source_path,
-            document.checksum,
-            original_target,
-        )
+        if document.storage_type == Document.STORAGE_TYPE_GPG:
+            t = int(time.mktime(document.created.timetuple()))
 
-        if thumbnail_target:
-            self.check_and_copy(document.thumbnail_path, None, thumbnail_target)
+            original_target.parent.mkdir(parents=True, exist_ok=True)
+            with document.source_file as out_file:
+                original_target.write_bytes(GnuPG.decrypted(out_file))
+                os.utime(original_target, times=(t, t))
 
-        if archive_target:
-            if TYPE_CHECKING:
-                assert isinstance(document.archive_path, Path)
-            self.check_and_copy(
-                document.archive_path,
-                document.archive_checksum,
-                archive_target,
-            )
+            if thumbnail_target:
+                thumbnail_target.parent.mkdir(parents=True, exist_ok=True)
+                with document.thumbnail_file as out_file:
+                    thumbnail_target.write_bytes(GnuPG.decrypted(out_file))
+                    os.utime(thumbnail_target, times=(t, t))
 
-    def _encrypt_record_inline(self, record: dict) -> None:
-        """Encrypt sensitive fields in a single record, if passphrase is set."""
-        if not self.passphrase:
-            return
-        fields = self.CRYPT_FIELDS_BY_MODEL.get(record.get("model", ""))
-        if fields:
-            for field in fields:
-                if record["fields"].get(field):
-                    record["fields"][field] = self.encrypt_string(
-                        value=record["fields"][field],
+            if archive_target:
+                archive_target.parent.mkdir(parents=True, exist_ok=True)
+                with document.archive_file as out_file:
+                    archive_target.write_bytes(GnuPG.decrypted(out_file))
+                    os.utime(archive_target, times=(t, t))
+        else:
+            with document.local_source_path() as source_path:
+                self.check_and_copy(
+                    source_path,
+                    document.checksum,
+                    original_target,
+                )
+
+            if thumbnail_target:
+                with document.local_thumbnail_path() as thumbnail_path:
+                    self.check_and_copy(thumbnail_path, None, thumbnail_target)
+
+            if archive_target:
+                with document.local_archive_path() as archive_path:
+                    self.check_and_copy(
+                        archive_path,
+                        document.archive_checksum,
+                        archive_target,
                     )
-
-    def _write_split_manifest(
-        self,
-        document_dict: dict,
-        document: Document,
-        base_name: Path,
-    ) -> None:
-        """Write per-document manifest file for --split-manifest mode."""
-        content = [document_dict]
-        content.extend(
-            serializers.serialize("python", Note.objects.filter(document=document)),
-        )
-        content.extend(
-            serializers.serialize(
-                "python",
-                CustomFieldInstance.objects.filter(document=document),
-            ),
-        )
-        manifest_name = base_name.with_name(f"{base_name.stem}-manifest.json")
-        if self.use_folder_prefix:
-            manifest_name = Path("json") / manifest_name
-        manifest_name = (self.target / manifest_name).resolve()
-        manifest_name.parent.mkdir(parents=True, exist_ok=True)
-        self.check_and_write_json(content, manifest_name)
 
     def check_and_write_json(
         self,
         content: list[dict] | dict,
         target: Path,
-    ) -> None:
+    ):
         """
         Writes the source content to the target json file.
         If --compare-json arg was used, don't write to target file if
@@ -651,25 +539,15 @@ class Command(CryptMixin, PaperlessCommand):
         if target in self.files_in_export_dir:
             self.files_in_export_dir.remove(target)
             if self.compare_json:
-                target_checksum = hashlib.blake2b(target.read_bytes()).hexdigest()
-                src_str = json.dumps(
-                    content,
-                    cls=DjangoJSONEncoder,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-                src_checksum = hashlib.blake2b(src_str.encode("utf-8")).hexdigest()
+                target_checksum = hashlib.md5(target.read_bytes()).hexdigest()
+                src_str = json.dumps(content, indent=2, ensure_ascii=False)
+                src_checksum = hashlib.md5(src_str.encode("utf-8")).hexdigest()
                 if src_checksum == target_checksum:
                     perform_write = False
 
         if perform_write:
             target.write_text(
-                json.dumps(
-                    content,
-                    cls=DjangoJSONEncoder,
-                    indent=2,
-                    ensure_ascii=False,
-                ),
+                json.dumps(content, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
 
@@ -678,7 +556,7 @@ class Command(CryptMixin, PaperlessCommand):
         source: Path,
         source_checksum: str | None,
         target: Path,
-    ) -> None:
+    ):
         """
         Copies the source to the target, if target doesn't exist or the target doesn't seem to match
         the source attributes
@@ -694,7 +572,7 @@ class Command(CryptMixin, PaperlessCommand):
             source_stat = source.stat()
             target_stat = target.stat()
             if self.compare_checksums and source_checksum:
-                target_checksum = compute_checksum(target)
+                target_checksum = hashlib.md5(target.read_bytes()).hexdigest()
                 perform_copy = target_checksum != source_checksum
             elif (
                 source_stat.st_mtime != target_stat.st_mtime
@@ -708,3 +586,28 @@ class Command(CryptMixin, PaperlessCommand):
         if perform_copy:
             target.parent.mkdir(parents=True, exist_ok=True)
             copy_file_with_basic_stats(source, target)
+
+    def encrypt_secret_fields(self, manifest: dict) -> None:
+        """
+        Encrypts certain fields in the export.  Currently limited to the mail account password
+        """
+
+        if self.passphrase:
+            self.setup_crypto(passphrase=self.passphrase)
+
+            for crypt_config in self.CRYPT_FIELDS:
+                exporter_key = crypt_config["exporter_key"]
+                crypt_fields = crypt_config["fields"]
+                for manifest_record in manifest[exporter_key]:
+                    for field in crypt_fields:
+                        if manifest_record["fields"][field]:
+                            manifest_record["fields"][field] = self.encrypt_string(
+                                value=manifest_record["fields"][field],
+                            )
+
+        elif MailAccount.objects.count() > 0 or SocialToken.objects.count() > 0:
+            self.stdout.write(
+                self.style.NOTICE(
+                    "No passphrase was given, sensitive fields will be in plaintext",
+                ),
+            )

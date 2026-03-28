@@ -75,13 +75,18 @@ export class TasksComponent
   private readonly router = inject(Router)
   private readonly toastService = inject(ToastService)
 
-  public activeTab: TaskTab
+  public activeTab: TaskTab = TaskTab.Failed
+  public importActiveTab: TaskTab = TaskTab.Failed
   public selectedTasks: Set<number> = new Set()
+  public selectedImportTasks: Set<number> = new Set()
   public togggleAll: boolean = false
+  public toggleAllImports: boolean = false
   public expandedTask: number
+  public expandedImportTask: number
 
   public pageSize: number = 25
   public page: number = 1
+  public importPage: number = 1
 
   public autoRefreshEnabled: boolean = true
 
@@ -107,6 +112,12 @@ export class TasksComponent
 
   get dismissButtonText(): string {
     return this.selectedTasks.size > 0
+      ? $localize`Dismiss selected`
+      : $localize`Dismiss all`
+  }
+
+  get dismissImportButtonText(): string {
+    return this.selectedImportTasks.size > 0
       ? $localize`Dismiss selected`
       : $localize`Dismiss all`
   }
@@ -137,14 +148,19 @@ export class TasksComponent
     this.tasksService.cancelPending()
   }
 
-  dismissTask(task: PaperlessTask) {
-    this.dismissTasks(task)
+  dismissTask(task: PaperlessTask, taskGroup: 'file' | 'import' = 'file') {
+    this.dismissTasks(task, taskGroup)
   }
 
-  dismissTasks(task: PaperlessTask = undefined) {
-    let tasks = task ? new Set([task.id]) : new Set(this.selectedTasks.values())
+  dismissTasks(
+    task: PaperlessTask = undefined,
+    taskGroup: 'file' | 'import' = 'file'
+  ) {
+    let tasks = task
+      ? new Set([task.id])
+      : new Set(this.getSelection(taskGroup).values())
     if (!task && tasks.size == 0)
-      tasks = new Set(this.tasksService.allFileTasks.map((t) => t.id))
+      tasks = new Set(this.getAllTasks(taskGroup).map((t) => t.id))
     if (tasks.size > 1) {
       let modal = this.modalService.open(ConfirmDialogComponent, {
         backdrop: 'static',
@@ -162,14 +178,14 @@ export class TasksComponent
             modal.componentInstance.buttonsEnabled = true
           },
         })
-        this.clearSelection()
+        this.clearSelection(taskGroup)
       })
     } else {
       this.tasksService.dismissTasks(tasks).subscribe({
         error: (e) =>
           this.toastService.showError($localize`Error dismissing task`, e),
       })
-      this.clearSelection()
+      this.clearSelection(taskGroup)
     }
   }
 
@@ -178,32 +194,29 @@ export class TasksComponent
     this.router.navigate(['documents', task.related_document])
   }
 
-  expandTask(task: PaperlessTask) {
-    this.expandedTask = this.expandedTask == task.id ? undefined : task.id
+  dismissImportAndGo(task: PaperlessTask) {
+    this.dismissTask(task, 'import')
+    this.router.navigate(['documents', task.related_document])
   }
 
-  toggleSelected(task: PaperlessTask) {
-    this.selectedTasks.has(task.id)
-      ? this.selectedTasks.delete(task.id)
-      : this.selectedTasks.add(task.id)
+  expandTask(task: PaperlessTask, taskGroup: 'file' | 'import' = 'file') {
+    if (taskGroup === 'file') {
+      this.expandedTask = this.expandedTask == task.id ? undefined : task.id
+    } else {
+      this.expandedImportTask =
+        this.expandedImportTask == task.id ? undefined : task.id
+    }
+  }
+
+  toggleSelected(task: PaperlessTask, taskGroup: 'file' | 'import' = 'file') {
+    const selectedTasks = this.getSelection(taskGroup)
+    selectedTasks.has(task.id)
+      ? selectedTasks.delete(task.id)
+      : selectedTasks.add(task.id)
   }
 
   get currentTasks(): PaperlessTask[] {
-    let tasks: PaperlessTask[] = []
-    switch (this.activeTab) {
-      case TaskTab.Queued:
-        tasks = this.tasksService.queuedFileTasks
-        break
-      case TaskTab.Started:
-        tasks = this.tasksService.startedFileTasks
-        break
-      case TaskTab.Completed:
-        tasks = this.tasksService.completedFileTasks
-        break
-      case TaskTab.Failed:
-        tasks = this.tasksService.failedFileTasks
-        break
-    }
+    let tasks: PaperlessTask[] = this.tasksForTab(this.activeTab, 'file')
     if (this._filterText.length) {
       tasks = tasks.filter((t) => {
         if (this.filterTargetID == TaskFilterTargetID.Name) {
@@ -218,30 +231,61 @@ export class TasksComponent
     return tasks
   }
 
-  toggleAll(event: PointerEvent) {
+  get currentImportTasks(): PaperlessTask[] {
+    return this.tasksForTab(this.importActiveTab, 'import')
+  }
+
+  toggleAll(event: PointerEvent, taskGroup: 'file' | 'import' = 'file') {
     if ((event.target as HTMLInputElement).checked) {
-      this.selectedTasks = new Set(this.currentTasks.map((t) => t.id))
+      if (taskGroup === 'file') {
+        this.togggleAll = true
+        this.selectedTasks = new Set(this.currentTasks.map((t) => t.id))
+      } else {
+        this.toggleAllImports = true
+        this.selectedImportTasks = new Set(
+          this.currentImportTasks.map((t) => t.id)
+        )
+      }
     } else {
-      this.clearSelection()
+      this.clearSelection(taskGroup)
     }
   }
 
-  clearSelection() {
-    this.togggleAll = false
-    this.selectedTasks.clear()
+  clearSelection(taskGroup: 'file' | 'import' = 'file') {
+    if (taskGroup === 'file') {
+      this.togggleAll = false
+      this.selectedTasks.clear()
+    } else {
+      this.toggleAllImports = false
+      this.selectedImportTasks.clear()
+    }
   }
 
-  duringTabChange() {
-    this.page = 1
+  duringTabChange(taskGroup: 'file' | 'import' = 'file') {
+    if (taskGroup === 'file') {
+      this.page = 1
+    } else {
+      this.importPage = 1
+    }
   }
 
-  beforeTabChange() {
-    this.resetFilter()
-    this.filterTargetID = TaskFilterTargetID.Name
+  beforeTabChange(taskGroup: 'file' | 'import' = 'file') {
+    if (taskGroup === 'file') {
+      this.resetFilter()
+      this.filterTargetID = TaskFilterTargetID.Name
+    }
   }
 
   get activeTabLocalized(): string {
-    switch (this.activeTab) {
+    return this.localizeTab(this.activeTab)
+  }
+
+  get activeImportTabLocalized(): string {
+    return this.localizeTab(this.importActiveTab)
+  }
+
+  private localizeTab(tab: TaskTab): string {
+    switch (tab) {
       case TaskTab.Queued:
         return $localize`queued`
       case TaskTab.Started:
@@ -262,6 +306,45 @@ export class TasksComponent
       this._filterText = (event.target as HTMLInputElement).value
     } else if (event.key === 'Escape') {
       this.resetFilter()
+    }
+  }
+
+  private getSelection(taskGroup: 'file' | 'import'): Set<number> {
+    return taskGroup === 'file' ? this.selectedTasks : this.selectedImportTasks
+  }
+
+  private getAllTasks(taskGroup: 'file' | 'import'): PaperlessTask[] {
+    return taskGroup === 'file'
+      ? this.tasksService.allFileTasks
+      : this.tasksService.allImportFileTasks
+  }
+
+  private tasksForTab(
+    tab: TaskTab,
+    taskGroup: 'file' | 'import'
+  ): PaperlessTask[] {
+    if (taskGroup === 'file') {
+      switch (tab) {
+        case TaskTab.Queued:
+          return this.tasksService.queuedFileTasks
+        case TaskTab.Started:
+          return this.tasksService.startedFileTasks
+        case TaskTab.Completed:
+          return this.tasksService.completedFileTasks
+        case TaskTab.Failed:
+          return this.tasksService.failedFileTasks
+      }
+    }
+
+    switch (tab) {
+      case TaskTab.Queued:
+        return this.tasksService.queuedImportFileTasks
+      case TaskTab.Started:
+        return this.tasksService.startedImportFileTasks
+      case TaskTab.Completed:
+        return this.tasksService.completedImportFileTasks
+      case TaskTab.Failed:
+        return this.tasksService.failedImportFileTasks
     }
   }
 }

@@ -11,9 +11,10 @@ from filelock import FileLock
 
 @dataclass(frozen=True)
 class EmailAttachment:
-    path: Path
+    path: Path | None
     mime_type: str
     friendly_name: str
+    content: bytes | None = None
 
 
 def send_email(
@@ -53,17 +54,23 @@ def send_email(
             )
             used_filenames.add(filename)
 
-            with attachment.path.open("rb") as f:
-                content = f.read()
-                if attachment.mime_type == "message/rfc822":
-                    # See https://forum.djangoproject.com/t/using-emailmessage-with-an-attached-email-file-crashes-due-to-non-ascii/37981
-                    content = message_from_bytes(content)
+            if attachment.content is not None:
+                content = attachment.content
+            elif attachment.path is not None:
+                with attachment.path.open("rb") as f:
+                    content = f.read()
+            else:
+                continue
 
-                email.attach(
-                    filename=filename,
-                    content=content,
-                    mimetype=attachment.mime_type,
-                )
+            if attachment.mime_type == "message/rfc822":
+                # See https://forum.djangoproject.com/t/using-emailmessage-with-an-attached-email-file-crashes-due-to-non-ascii/37981
+                content = message_from_bytes(content)
+
+            email.attach(
+                filename=filename,
+                content=content,
+                mimetype=attachment.mime_type,
+            )
 
     return email.send()
 

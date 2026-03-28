@@ -1,8 +1,8 @@
 import logging
-import shutil
 
 from documents.management.commands.base import PaperlessCommand
 from documents.models import Document
+from documents.storage import document_write_from_path
 from paperless.parsers.registry import get_parser_registry
 
 logger = logging.getLogger("paperless.management.thumbnails")
@@ -25,8 +25,14 @@ def _process_document(doc_id: int) -> None:
         return
 
     with parser_class() as parser:
-        thumb = parser.get_thumbnail(document.source_path, document.mime_type)
-        shutil.move(thumb, document.thumbnail_path)
+        with document.local_source_path() as source_path:
+            thumb = parser.get_thumbnail(
+                source_path,
+                document.mime_type,
+                document.get_public_filename(),
+            )
+
+        document_write_from_path("thumbnails", document.thumbnail_name, thumb)
 
 
 class Command(PaperlessCommand):

@@ -36,6 +36,9 @@ export class TextComponent extends AbstractInputComponent<string> {
   @Input()
   suggestion: string = ''
 
+  @Input()
+  inputType: string = 'text'
+
   constructor() {
     super()
   }

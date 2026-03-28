@@ -1122,26 +1122,26 @@ class DocumentViewSet(
         document_cached_metadata = get_metadata_cache(doc.pk)
 
         archive_metadata = None
-        archive_filesize = (
-            self.get_filesize(doc.archive_path) if doc.has_archive_version else None
-        )
+        archive_filesize = doc.archive_size() if doc.has_archive_version else None
         if document_cached_metadata is not None:
             original_metadata = document_cached_metadata.original_metadata
             archive_metadata = document_cached_metadata.archive_metadata
             refresh_metadata_cache(doc.pk)
         else:
-            original_metadata = self.get_metadata(doc.source_path, doc.mime_type)
+            with doc.local_source_path() as source_path:
+                original_metadata = self.get_metadata(source_path, doc.mime_type)
 
             if doc.has_archive_version:
-                archive_metadata = self.get_metadata(
-                    doc.archive_path,
-                    "application/pdf",
-                )
+                with doc.local_archive_path() as archive_path:
+                    archive_metadata = self.get_metadata(
+                        archive_path,
+                        "application/pdf",
+                    )
             set_metadata_cache(doc, original_metadata, archive_metadata)
 
         meta = {
             "original_checksum": doc.checksum,
-            "original_size": self.get_filesize(doc.source_path),
+            "original_size": doc.source_size(),
             "original_mime_type": doc.mime_type,
             "media_filename": doc.filename,
             "has_archive_version": doc.has_archive_version,
@@ -1579,14 +1579,14 @@ class DocumentViewSet(
         try:
             attachments: list[EmailAttachment] = []
             for doc in documents:
-                attachment_path = (
-                    doc.archive_path
-                    if use_archive_version and doc.has_archive_version
-                    else doc.source_path
-                )
                 attachments.append(
                     EmailAttachment(
-                        path=attachment_path,
+                        path=None,
+                        content=(
+                            doc.archive_read_bytes()
+                            if use_archive_version and doc.has_archive_version
+                            else doc.source_read_bytes()
+                        ),
                         mime_type=doc.mime_type,
                         friendly_name=doc.get_public_filename(
                             archive=use_archive_version and doc.has_archive_version,

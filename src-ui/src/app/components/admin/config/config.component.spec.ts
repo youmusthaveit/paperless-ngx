@@ -60,7 +60,9 @@ describe('ConfigComponent', () => {
 
   it('should load config on init, show error if necessary', () => {
     const getSpy = jest.spyOn(configService, 'getConfig')
+    const getStoragesSpy = jest.spyOn(configService, 'getS3Storages')
     const errorSpy = jest.spyOn(toastService, 'showError')
+    getStoragesSpy.mockReturnValue(of([]))
     getSpy.mockReturnValueOnce(
       throwError(() => new Error('Error getting config'))
     )

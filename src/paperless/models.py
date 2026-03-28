@@ -1,4 +1,5 @@
 from django.core.validators import FileExtensionValidator
+from django.core.validators import MaxValueValidator
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -86,6 +87,105 @@ class LLMBackend(models.TextChoices):
 
     OPENAI = ("openai", _("OpenAI"))
     OLLAMA = ("ollama", _("Ollama"))
+
+
+class DocumentStorageTypeChoices(models.TextChoices):
+    LOCAL = ("local", _("local"))
+    S3 = ("s3", _("s3"))
+
+
+class S3StorageConfiguration(models.Model):
+    name = models.CharField(
+        verbose_name=_("Storage name"),
+        max_length=255,
+        unique=True,
+    )
+
+    prefix = models.CharField(
+        verbose_name=_("Sets the S3 storage prefix"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    bucket = models.CharField(
+        verbose_name=_("Sets the S3 bucket"),
+        max_length=255,
+    )
+
+    endpoint_url = models.CharField(
+        verbose_name=_("Sets the S3 endpoint URL"),
+        null=True,
+        blank=True,
+        max_length=512,
+    )
+
+    access_key_id = models.CharField(
+        verbose_name=_("Sets the S3 access key ID"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    secret_access_key = models.CharField(
+        verbose_name=_("Sets the S3 secret access key"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    region_name = models.CharField(
+        verbose_name=_("Sets the S3 region"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    default_acl = models.CharField(
+        verbose_name=_("Sets the S3 default ACL"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    custom_domain = models.CharField(
+        verbose_name=_("Sets the S3 custom domain"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    url_protocol = models.CharField(
+        verbose_name=_("Sets the S3 URL protocol"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    addressing_style = models.CharField(
+        verbose_name=_("Sets the S3 addressing style"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    querystring_auth = models.BooleanField(
+        verbose_name=_("Sets whether S3 querystring auth is enabled"),
+        null=True,
+    )
+
+    use_ssl = models.BooleanField(
+        verbose_name=_("Sets whether S3 uses SSL"),
+        null=True,
+    )
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name = _("S3 storage configuration")
+        verbose_name_plural = _("S3 storage configurations")
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class ApplicationConfiguration(AbstractSingletonModel):
@@ -200,6 +300,247 @@ class ApplicationConfiguration(AbstractSingletonModel):
             FileExtensionValidator(allowed_extensions=["jpg", "png", "gif", "svg"]),
         ],
         upload_to="logo/",
+    )
+
+    documents_storage_type = models.CharField(
+        verbose_name=_("Sets the document storage backend"),
+        null=True,
+        blank=True,
+        max_length=16,
+        choices=DocumentStorageTypeChoices.choices,
+    )
+
+    documents_storage_prefix = models.CharField(
+        verbose_name=_("Sets the document storage prefix"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_storage = models.ForeignKey(
+        S3StorageConfiguration,
+        verbose_name=_("Selects the S3 storage for documents"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="documents_primary_configs",
+    )
+
+    documents_s3_bucket = models.CharField(
+        verbose_name=_("Sets the S3 bucket for documents"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_endpoint_url = models.CharField(
+        verbose_name=_("Sets the S3 endpoint URL"),
+        null=True,
+        blank=True,
+        max_length=512,
+    )
+
+    documents_s3_access_key_id = models.CharField(
+        verbose_name=_("Sets the S3 access key ID"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_secret_access_key = models.CharField(
+        verbose_name=_("Sets the S3 secret access key"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_region_name = models.CharField(
+        verbose_name=_("Sets the S3 region"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_default_acl = models.CharField(
+        verbose_name=_("Sets the S3 default ACL"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_custom_domain = models.CharField(
+        verbose_name=_("Sets the S3 custom domain"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_s3_url_protocol = models.CharField(
+        verbose_name=_("Sets the S3 URL protocol"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_s3_addressing_style = models.CharField(
+        verbose_name=_("Sets the S3 addressing style"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_s3_querystring_auth = models.BooleanField(
+        verbose_name=_("Sets whether S3 querystring auth is enabled"),
+        null=True,
+    )
+
+    documents_s3_use_ssl = models.BooleanField(
+        verbose_name=_("Sets whether S3 uses SSL"),
+        null=True,
+    )
+
+    documents_backup_prefix = models.CharField(
+        verbose_name=_("Sets the S3 backup prefix for documents"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_storage = models.ForeignKey(
+        S3StorageConfiguration,
+        verbose_name=_("Selects the S3 storage for document backups"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="documents_backup_configs",
+    )
+
+    documents_backup_s3_bucket = models.CharField(
+        verbose_name=_("Sets the S3 backup bucket for documents"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_endpoint_url = models.CharField(
+        verbose_name=_("Sets the S3 backup endpoint URL"),
+        null=True,
+        blank=True,
+        max_length=512,
+    )
+
+    documents_backup_s3_access_key_id = models.CharField(
+        verbose_name=_("Sets the S3 backup access key ID"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_secret_access_key = models.CharField(
+        verbose_name=_("Sets the S3 backup secret access key"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_region_name = models.CharField(
+        verbose_name=_("Sets the S3 backup region"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_default_acl = models.CharField(
+        verbose_name=_("Sets the S3 backup default ACL"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_custom_domain = models.CharField(
+        verbose_name=_("Sets the S3 backup custom domain"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
+    documents_backup_s3_url_protocol = models.CharField(
+        verbose_name=_("Sets the S3 backup URL protocol"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_backup_s3_addressing_style = models.CharField(
+        verbose_name=_("Sets the S3 backup addressing style"),
+        null=True,
+        blank=True,
+        max_length=32,
+    )
+
+    documents_backup_s3_querystring_auth = models.BooleanField(
+        verbose_name=_("Sets whether S3 backup querystring auth is enabled"),
+        null=True,
+    )
+
+    documents_backup_s3_use_ssl = models.BooleanField(
+        verbose_name=_("Sets whether S3 backup uses SSL"),
+        null=True,
+    )
+
+    documents_backup_schedule_enabled = models.BooleanField(
+        verbose_name=_("Enables automatic full backups"),
+        null=True,
+    )
+
+    documents_backup_schedule_storage = models.ForeignKey(
+        S3StorageConfiguration,
+        verbose_name=_("Selects the S3 storage for automatic full backups"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="automatic_backup_configs",
+    )
+
+    documents_backup_schedule_frequency_days = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup interval in days"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
+
+    documents_backup_schedule_hour = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup hour"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(23)],
+    )
+
+    documents_backup_schedule_minute = models.PositiveIntegerField(
+        verbose_name=_("Sets the automatic backup minute"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(59)],
+    )
+
+    documents_backup_schedule_retain_count = models.PositiveIntegerField(
+        verbose_name=_("Sets how many automatic backups are retained"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
+
+    documents_backup_schedule_last_run = models.DateTimeField(
+        verbose_name=_("Tracks the last automatic backup run"),
+        null=True,
+        blank=True,
+    )
+
+    documents_backup_schedule_jobs = models.JSONField(
+        verbose_name=_("Stores automatic backup job definitions"),
+        null=True,
+        blank=True,
+        default=list,
     )
 
     """

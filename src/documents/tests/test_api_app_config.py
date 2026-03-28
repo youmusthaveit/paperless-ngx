@@ -1,17 +1,20 @@
 import json
+import uuid
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest import mock
 
+from celery import states
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from documents.models import PaperlessTask
 from documents.tests.utils import DirectoriesMixin
 from paperless.models import ApplicationConfiguration
 from paperless.models import ColorConvertChoices
+from paperless.models import S3StorageConfiguration
 
 
 class TestApiAppConfig(DirectoriesMixin, APITestCase):
@@ -23,7 +26,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         user = User.objects.create_superuser(username="temp_admin")
         self.client.force_authenticate(user=user)
 
-    def test_api_get_config(self) -> None:
+    def test_api_get_config(self):
         """
         GIVEN:
             - API request to get app config
@@ -57,6 +60,41 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "user_args": None,
                 "app_title": None,
                 "app_logo": None,
+                "documents_storage_type": None,
+                "documents_storage_prefix": None,
+                "documents_s3_storage": None,
+                "documents_s3_bucket": None,
+                "documents_s3_endpoint_url": None,
+                "documents_s3_access_key_id": None,
+                "documents_s3_secret_access_key": None,
+                "documents_s3_region_name": None,
+                "documents_s3_default_acl": None,
+                "documents_s3_custom_domain": None,
+                "documents_s3_url_protocol": None,
+                "documents_s3_addressing_style": None,
+                "documents_s3_querystring_auth": None,
+                "documents_s3_use_ssl": None,
+                "documents_backup_prefix": None,
+                "documents_backup_s3_storage": None,
+                "documents_backup_s3_bucket": None,
+                "documents_backup_s3_endpoint_url": None,
+                "documents_backup_s3_access_key_id": None,
+                "documents_backup_s3_secret_access_key": None,
+                "documents_backup_s3_region_name": None,
+                "documents_backup_s3_default_acl": None,
+                "documents_backup_s3_custom_domain": None,
+                "documents_backup_s3_url_protocol": None,
+                "documents_backup_s3_addressing_style": None,
+                "documents_backup_s3_querystring_auth": None,
+                "documents_backup_s3_use_ssl": None,
+                "documents_backup_schedule_enabled": None,
+                "documents_backup_schedule_storage": None,
+                "documents_backup_schedule_frequency_days": None,
+                "documents_backup_schedule_hour": None,
+                "documents_backup_schedule_minute": None,
+                "documents_backup_schedule_retain_count": None,
+                "documents_backup_schedule_last_run": None,
+                "documents_backup_schedule_jobs": [],
                 "barcodes_enabled": None,
                 "barcode_enable_tiff_support": None,
                 "barcode_string": None,
@@ -68,18 +106,10 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "barcode_max_pages": None,
                 "barcode_enable_tag": None,
                 "barcode_tag_mapping": None,
-                "barcode_tag_split": None,
-                "ai_enabled": False,
-                "llm_embedding_backend": None,
-                "llm_embedding_model": None,
-                "llm_backend": None,
-                "llm_model": None,
-                "llm_api_key": None,
-                "llm_endpoint": None,
             },
         )
 
-    def test_api_get_ui_settings_with_config(self) -> None:
+    def test_api_get_ui_settings_with_config(self):
         """
         GIVEN:
             - Existing config with app_title, app_logo specified
@@ -102,7 +132,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
             | response.data["settings"],
         )
 
-    def test_api_update_config(self) -> None:
+    def test_api_update_config(self):
         """
         GIVEN:
             - API request to update app config
@@ -125,7 +155,301 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         config = ApplicationConfiguration.objects.first()
         self.assertEqual(config.color_conversion_strategy, ColorConvertChoices.RGB)
 
-    def test_api_update_config_empty_fields(self) -> None:
+    def test_api_update_document_storage_config(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Primary",
+            prefix="tenant-a/documents",
+            bucket="selected-primary",
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_storage_type": "s3",
+                    "documents_storage_prefix": "tenant-a/documents",
+                    "documents_s3_storage": selected_storage.pk,
+                    "documents_s3_bucket": "paperless-test",
+                    "documents_s3_access_key_id": "access-key",
+                    "documents_s3_secret_access_key": "secret-key",
+                    "documents_s3_querystring_auth": True,
+                    "documents_s3_use_ssl": False,
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(config.documents_storage_type, "s3")
+        self.assertEqual(config.documents_storage_prefix, "tenant-a/documents")
+        self.assertEqual(config.documents_s3_storage, selected_storage)
+        self.assertEqual(config.documents_s3_bucket, "paperless-test")
+        self.assertEqual(config.documents_s3_access_key_id, "access-key")
+        self.assertEqual(config.documents_s3_secret_access_key, "secret-key")
+        self.assertEqual(config.documents_s3_querystring_auth, True)
+        self.assertEqual(config.documents_s3_use_ssl, False)
+
+        response = self.client.get(self.ENDPOINT, format="json")
+        self.assertNotEqual(
+            response.data[0]["documents_s3_secret_access_key"],
+            "secret-key",
+        )
+
+    def test_api_update_document_storage_secret_keeps_existing_masked_value(self):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_s3_secret_access_key = "keep-me"
+        config.save()
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config.refresh_from_db()
+        self.assertEqual(config.documents_s3_secret_access_key, "keep-me")
+
+    def test_api_update_document_backup_config(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Backup",
+            prefix="paperless/backup",
+            bucket="selected-backup",
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_prefix": "paperless/backup",
+                    "documents_backup_s3_storage": selected_storage.pk,
+                    "documents_backup_s3_bucket": "paperless-backup",
+                    "documents_backup_s3_access_key_id": "backup-access-key",
+                    "documents_backup_s3_secret_access_key": "backup-secret-key",
+                    "documents_backup_s3_querystring_auth": False,
+                    "documents_backup_s3_use_ssl": True,
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(config.documents_backup_prefix, "paperless/backup")
+        self.assertEqual(config.documents_backup_s3_storage, selected_storage)
+        self.assertEqual(config.documents_backup_s3_bucket, "paperless-backup")
+        self.assertEqual(
+            config.documents_backup_s3_access_key_id,
+            "backup-access-key",
+        )
+        self.assertEqual(
+            config.documents_backup_s3_secret_access_key,
+            "backup-secret-key",
+        )
+        self.assertEqual(config.documents_backup_s3_querystring_auth, False)
+        self.assertEqual(config.documents_backup_s3_use_ssl, True)
+
+        response = self.client.get(self.ENDPOINT, format="json")
+        self.assertNotEqual(
+            response.data[0]["documents_backup_s3_secret_access_key"],
+            "backup-secret-key",
+        )
+
+    def test_api_update_document_backup_secret_keeps_existing_masked_value(self):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_backup_s3_secret_access_key = "keep-backup-secret"
+        config.save()
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config.refresh_from_db()
+        self.assertEqual(
+            config.documents_backup_s3_secret_access_key,
+            "keep-backup-secret",
+        )
+
+    def test_api_update_automatic_backup_jobs(self):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Scheduled Backup",
+            bucket="scheduled-bucket",
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "documents_backup_schedule_jobs": [
+                        {
+                            "name": "Nightly",
+                            "enabled": True,
+                            "storage": selected_storage.pk,
+                            "frequency_days": 1,
+                            "hour": 2,
+                            "minute": 15,
+                            "retain_count": 7,
+                            "last_run": None,
+                        },
+                        {
+                            "name": "Weekly",
+                            "enabled": False,
+                            "storage": selected_storage.pk,
+                            "frequency_days": 7,
+                            "hour": 5,
+                            "minute": 0,
+                            "retain_count": 4,
+                            "last_run": None,
+                        },
+                    ],
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(
+            config.documents_backup_schedule_jobs,
+            [
+                {
+                    "name": "Nightly",
+                    "enabled": True,
+                    "storage": selected_storage.pk,
+                    "frequency_days": 1,
+                    "hour": 2,
+                    "minute": 15,
+                    "retain_count": 7,
+                    "last_run": None,
+                },
+                {
+                    "name": "Weekly",
+                    "enabled": False,
+                    "storage": selected_storage.pk,
+                    "frequency_days": 7,
+                    "hour": 5,
+                    "minute": 0,
+                    "retain_count": 4,
+                    "last_run": None,
+                },
+            ],
+        )
+
+    @mock.patch("paperless.views.test_document_storage_connection")
+    def test_api_test_s3_storage(self, test_storage_mock):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Primary",
+            prefix="tenant-a/documents",
+            bucket="selected-primary",
+        )
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-storage/",
+            json.dumps(
+                {
+                    "documents_storage_type": "s3",
+                    "documents_s3_storage": selected_storage.pk,
+                    "documents_s3_bucket": "paperless-test",
+                    "documents_s3_secret_access_key": "secret-key",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_storage_type": "s3",
+                "documents_s3_storage": selected_storage,
+                "documents_s3_bucket": "paperless-test",
+                "documents_s3_secret_access_key": "secret-key",
+            },
+        )
+
+    @mock.patch("paperless.views.test_document_storage_connection")
+    def test_api_test_s3_storage_uses_existing_masked_secret(self, test_storage_mock):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_s3_secret_access_key = "keep-me"
+        config.save()
+
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-storage/",
+            json.dumps(
+                {
+                    "documents_storage_type": "s3",
+                    "documents_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_storage_type": "s3",
+                "documents_s3_secret_access_key": "keep-me",
+            },
+        )
+
+    @mock.patch("paperless.views.test_document_backup_storage_connection")
+    def test_api_test_s3_backup_storage(self, test_storage_mock):
+        selected_storage = S3StorageConfiguration.objects.create(
+            name="Backup",
+            prefix="paperless/backup",
+            bucket="selected-backup",
+        )
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-backup-storage/",
+            json.dumps(
+                {
+                    "documents_backup_s3_storage": selected_storage.pk,
+                    "documents_backup_s3_bucket": "paperless-backup",
+                    "documents_backup_s3_secret_access_key": "backup-secret-key",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_backup_s3_storage": selected_storage,
+                "documents_backup_s3_bucket": "paperless-backup",
+                "documents_backup_s3_secret_access_key": "backup-secret-key",
+            },
+        )
+
+    @mock.patch("paperless.views.test_document_backup_storage_connection")
+    def test_api_test_s3_backup_storage_uses_existing_masked_secret(
+        self,
+        test_storage_mock,
+    ):
+        config = ApplicationConfiguration.objects.first()
+        config.documents_backup_s3_secret_access_key = "keep-backup-secret"
+        config.save()
+
+        response = self.client.post(
+            f"{self.ENDPOINT}1/test-s3-backup-storage/",
+            json.dumps(
+                {
+                    "documents_backup_s3_secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_storage_mock.assert_called_once_with(
+            {
+                "documents_backup_s3_secret_access_key": "keep-backup-secret",
+            },
+        )
+
+    def test_api_update_config_empty_fields(self):
         """
         GIVEN:
             - API request to update app config with empty string for user_args JSONField and language field
@@ -152,7 +476,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(config.language, None)
         self.assertEqual(config.barcode_tag_mapping, None)
 
-    def test_api_replace_app_logo(self) -> None:
+    def test_api_replace_app_logo(self):
         """
         GIVEN:
             - Existing config with app_logo specified
@@ -201,7 +525,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         )
         self.assertFalse(Path(old_logo.path).exists())
 
-    def test_api_rejects_malicious_svg_logo(self) -> None:
+    def test_api_rejects_malicious_svg_logo(self):
         """
         GIVEN:
             - An SVG logo containing a <script> tag
@@ -228,7 +552,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("disallowed svg tag", str(response.data).lower())
 
-    def test_api_rejects_malicious_svg_with_style_javascript(self) -> None:
+    def test_api_rejects_malicious_svg_with_style_javascript(self):
         """
         GIVEN:
             - An SVG logo containing javascript: in style attribute
@@ -258,7 +582,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         )
         self.assertIn("style", str(response.data).lower())
 
-    def test_api_rejects_svg_with_style_expression(self) -> None:
+    def test_api_rejects_svg_with_style_expression(self):
         """
         GIVEN:
             - An SVG logo containing CSS expression() in style
@@ -284,7 +608,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("disallowed", str(response.data).lower())
 
-    def test_api_rejects_svg_with_style_cdata_javascript(self) -> None:
+    def test_api_rejects_svg_with_style_cdata_javascript(self):
         """
         GIVEN:
             - An SVG logo with javascript: hidden in a CDATA style block
@@ -313,7 +637,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("disallowed", str(response.data).lower())
 
-    def test_api_rejects_svg_with_style_import(self) -> None:
+    def test_api_rejects_svg_with_style_import(self):
         """
         GIVEN:
             - An SVG logo containing @import in style
@@ -339,7 +663,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("disallowed", str(response.data).lower())
 
-    def test_api_accepts_valid_svg_with_safe_style(self) -> None:
+    def test_api_accepts_valid_svg_with_safe_style(self):
         """
         GIVEN:
             - A valid SVG logo with safe style attributes
@@ -365,7 +689,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_api_accepts_valid_svg_with_safe_style_tag(self) -> None:
+    def test_api_accepts_valid_svg_with_safe_style_tag(self):
         """
         GIVEN:
             - A valid SVG logo with an embedded <style> tag
@@ -395,7 +719,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_api_rejects_svg_with_disallowed_attribute(self) -> None:
+    def test_api_rejects_svg_with_disallowed_attribute(self):
         """
         GIVEN:
             - An SVG with a disallowed attribute (onclick)
@@ -422,7 +746,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertIn("disallowed", str(response.data).lower())
         self.assertIn("attribute", str(response.data).lower())
 
-    def test_api_rejects_svg_with_disallowed_tag(self) -> None:
+    def test_api_rejects_svg_with_disallowed_tag(self):
         """
         GIVEN:
             - An SVG with a disallowed tag (script)
@@ -450,7 +774,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertIn("disallowed", str(response.data).lower())
         self.assertIn("tag", str(response.data).lower())
 
-    def test_api_rejects_svg_with_javascript_href(self) -> None:
+    def test_api_rejects_svg_with_javascript_href(self):
         """
         GIVEN:
             - An SVG with javascript: in href attribute
@@ -479,7 +803,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertIn("disallowed", str(response.data).lower())
         self.assertIn("javascript", str(response.data).lower())
 
-    def test_api_rejects_svg_with_javascript_xlink_href(self) -> None:
+    def test_api_rejects_svg_with_javascript_xlink_href(self):
         """
         GIVEN:
             - An SVG with javascript: in xlink:href attribute
@@ -505,7 +829,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertIn("disallowed", str(response.data).lower())
         self.assertIn("javascript", str(response.data).lower())
 
-    def test_api_rejects_svg_with_data_text_html_href(self) -> None:
+    def test_api_rejects_svg_with_data_text_html_href(self):
         """
         GIVEN:
             - An SVG with data:text/html in href attribute
@@ -534,7 +858,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         # This will now catch "Disallowed URI scheme"
         self.assertIn("disallowed", str(response.data).lower())
 
-    def test_api_rejects_svg_with_unknown_namespace_attribute(self) -> None:
+    def test_api_rejects_svg_with_unknown_namespace_attribute(self):
         """
         GIVEN:
             - An SVG with an attribute in an unknown/custom namespace
@@ -600,7 +924,7 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         # Check for the error message raised by the safe_prefixes check
         self.assertIn("uri scheme not allowed", str(response.data).lower())
 
-    def test_create_not_allowed(self) -> None:
+    def test_create_not_allowed(self):
         """
         GIVEN:
             - API request to create a new app config
@@ -622,89 +946,405 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         self.assertEqual(ApplicationConfiguration.objects.count(), 1)
 
-    def test_update_llm_api_key(self) -> None:
-        """
-        GIVEN:
-            - Existing config with llm_api_key specified
-        WHEN:
-            - API to update llm_api_key is called with all *s
-            - API to update llm_api_key is called with empty string
-        THEN:
-            - llm_api_key is unchanged
-            - llm_api_key is set to None
-        """
-        config = ApplicationConfiguration.objects.first()
-        config.llm_api_key = "1234567890"
-        config.save()
 
-        # Test with all *
-        response = self.client.patch(
-            f"{self.ENDPOINT}1/",
+class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
+    ENDPOINT = "/api/s3_storages/"
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        user = User.objects.create_superuser(username="temp_admin_storage")
+        self.client.force_authenticate(user=user)
+
+    def test_api_create_s3_storage(self):
+        response = self.client.post(
+            self.ENDPOINT,
             json.dumps(
                 {
-                    "llm_api_key": "*" * 32,
+                    "name": "Primary storage",
+                    "prefix": "documents",
+                    "bucket": "paperless-primary",
+                    "endpoint_url": "https://s3.example.com",
+                    "access_key_id": "access-key",
+                    "secret_access_key": "secret-key",
+                    "querystring_auth": True,
+                    "use_ssl": False,
                 },
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        config.refresh_from_db()
-        self.assertEqual(config.llm_api_key, "1234567890")
-        # Test with empty string
-        response = self.client.patch(
-            f"{self.ENDPOINT}1/",
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        storage = S3StorageConfiguration.objects.get(name="Primary storage")
+        self.assertEqual(storage.prefix, "documents")
+        self.assertEqual(storage.bucket, "paperless-primary")
+        self.assertEqual(storage.secret_access_key, "secret-key")
+
+        list_response = self.client.get(self.ENDPOINT, format="json")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(list_response.data[0]["secret_access_key"], "secret-key")
+
+    def test_api_create_s3_storage_with_optional_prefix(self):
+        response = self.client.post(
+            self.ENDPOINT,
             json.dumps(
                 {
-                    "llm_api_key": "",
+                    "name": "No prefix storage",
+                    "prefix": "",
+                    "bucket": "paperless-primary",
+                    "endpoint_url": "https://s3.example.com",
+                    "access_key_id": "access-key",
+                    "secret_access_key": "secret-key",
                 },
             ),
             content_type="application/json",
         )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        storage = S3StorageConfiguration.objects.get(name="No prefix storage")
+        self.assertIsNone(storage.prefix)
+
+    @mock.patch("paperless.views.test_s3_connection")
+    def test_api_test_named_s3_storage(self, test_s3_connection_mock):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/test-connection/",
+            json.dumps(
+                {
+                    "secret_access_key": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        config.refresh_from_db()
-        self.assertEqual(config.llm_api_key, None)
+        test_s3_connection_mock.assert_called_once_with(
+            prefix="backup",
+            s3_bucket="paperless-backup",
+            s3_endpoint_url="https://s3.example.com",
+            s3_access_key_id="backup-access",
+            s3_secret_access_key="backup-secret",
+            s3_region_name=None,
+            s3_default_acl=None,
+            s3_custom_domain=None,
+            s3_url_protocol="https:",
+            s3_addressing_style=None,
+            s3_querystring_auth=False,
+            s3_use_ssl=True,
+        )
 
-    def test_enable_ai_index_triggers_update(self) -> None:
-        """
-        GIVEN:
-            - Existing config with AI disabled
-        WHEN:
-            - Config is updated to enable AI with llm_embedding_backend
-        THEN:
-            - LLM index is triggered to update
-        """
+    @mock.patch("paperless.views.export_documents_to_s3_storage.delay")
+    def test_api_export_named_s3_storage(self, export_delay_mock):
+        task_id = str(uuid.uuid4())
+        export_delay_mock.return_value = mock.Mock(id=task_id)
+        storage = S3StorageConfiguration.objects.create(
+            name="Primary storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/export/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        export_delay_mock.assert_called_once_with(storage.pk)
+        task = PaperlessTask.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, PaperlessTask.TaskName.EXPORT_S3_STORAGE)
+        self.assertEqual(task.status, states.PENDING)
+        self.assertEqual(task.task_file_name, storage.name)
+
+    @mock.patch(
+        "paperless.views.build_manual_s3_export_filename",
+        return_value="paperless-manual-export-20260327T120000Z.zip",
+    )
+    @mock.patch("paperless.views.call_command")
+    def test_api_download_manual_export(self, call_command_mock, _filename_mock):
+        def create_export(command_name, export_dir, **kwargs):
+            self.assertEqual(command_name, "document_exporter")
+            export_path = (
+                Path(export_dir) / "paperless-manual-export-20260327T120000Z.zip"
+            )
+            export_path.write_bytes(b"zip-content")
+
+        call_command_mock.side_effect = create_export
+
         config = ApplicationConfiguration.objects.first()
-        config.ai_enabled = False
-        config.llm_embedding_backend = None
-        config.save()
+        response = self.client.post(
+            f"/api/config/{config.pk}/download-export/",
+            content_type="application/json",
+        )
 
-        with (
-            patch("documents.tasks.llmindex_index.delay") as mock_update,
-            patch("paperless_ai.indexing.vector_store_file_exists") as mock_exists,
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-manual-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")
+
+    def test_api_delete_named_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+
+        with mock.patch(
+            "paperless.views.get_s3_configuration_storage",
+            return_value=storage_backend,
         ):
-            mock_exists.return_value = False
-            self.client.patch(
-                f"{self.ENDPOINT}1/",
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/delete-export/",
                 json.dumps(
                     {
-                        "ai_enabled": True,
-                        "llm_embedding_backend": "openai",
+                        "export_name": "paperless-manual-export-20260327T120000Z.zip",
                     },
                 ),
                 content_type="application/json",
             )
-            mock_update.assert_called_once()
 
-    @override_settings(LLM_ALLOW_INTERNAL_ENDPOINTS=False)
-    def test_update_llm_endpoint_blocks_internal_endpoint_when_disallowed(self) -> None:
-        response = self.client.patch(
-            f"{self.ENDPOINT}1/",
-            json.dumps(
-                {
-                    "llm_endpoint": "http://127.0.0.1:11434",
-                },
-            ),
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["detail"],
+            'Successfully deleted export "paperless-manual-export-20260327T120000Z.zip".',
+        )
+        storage_backend.delete.assert_called_once_with(
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+
+    @mock.patch("paperless.views.import_documents_from_s3_storage.delay")
+    def test_api_import_named_s3_storage(self, import_delay_mock):
+        task_id = str(uuid.uuid4())
+        import_delay_mock.return_value = mock.Mock(id=task_id)
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/import/",
+            json.dumps({"export_name": "paperless-manual-export-20260327T120000Z.zip"}),
             content_type="application/json",
         )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        import_delay_mock.assert_called_once_with(
+            storage.pk,
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        task = PaperlessTask.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, PaperlessTask.TaskName.IMPORT_S3_STORAGE)
+        self.assertEqual(task.status, states.PENDING)
+        self.assertEqual(task.task_file_name, storage.name)
+
+    def test_api_delete_named_s3_export_requires_export_name(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/delete-export/",
+            json.dumps({}),
+            content_type="application/json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("non-public address", str(response.data).lower())
+
+    def test_api_import_named_s3_storage_requires_export_name(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="documents",
+            bucket="paperless-primary",
+            endpoint_url="https://s3.example.com",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/import/",
+            json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_api_list_named_s3_exports(self):
+        modified = "2026-03-27T12:34:56Z"
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.listdir.return_value = (
+            [],
+            [
+                "paperless-manual-export-20260327T120000Z.zip",
+                "ignore.txt",
+                "paperless-manual-export-20260326T120000Z.zip",
+            ],
+        )
+        storage_backend.size.side_effect = [456, 123]
+        storage_backend.get_modified_time.side_effect = [modified, modified]
+
+        with mock.patch(
+            "paperless.views.S3StorageConfigurationViewSet._get_export_storage_candidates",
+            return_value=[("manual-transfer", storage_backend)],
+        ):
+            response = self.client.get(f"{self.ENDPOINT}{storage.pk}/exports/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data[0]["name"],
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        self.assertEqual(response.data[0]["size"], 456)
+
+    def test_api_list_named_s3_exports_includes_automatic_exports(self):
+        modified = "2026-03-27T12:34:56Z"
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        manual_storage_backend = mock.Mock()
+        manual_storage_backend.listdir.return_value = (
+            [],
+            ["paperless-manual-export-20260327T120000Z.zip"],
+        )
+        manual_storage_backend.size.return_value = 123
+        manual_storage_backend.get_modified_time.return_value = modified
+
+        automatic_storage_backend = mock.Mock()
+        automatic_storage_backend.listdir.side_effect = [
+            (["2026-03-27"], []),
+            ([], ["paperless-automatic-export-20260327T120000Z.zip"]),
+        ]
+        automatic_storage_backend.size.return_value = 456
+        automatic_storage_backend.get_modified_time.return_value = modified
+
+        with mock.patch(
+            "paperless.views.S3StorageConfigurationViewSet._get_export_storage_candidates",
+            return_value=[
+                ("manual-transfer", manual_storage_backend),
+                ("automatic-transfer", automatic_storage_backend),
+            ],
+        ):
+            response = self.client.get(f"{self.ENDPOINT}{storage.pk}/exports/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data[0]["name"],
+            "paperless-manual-export-20260327T120000Z.zip",
+        )
+        self.assertEqual(
+            response.data[1]["name"],
+            "2026-03-27/paperless-automatic-export-20260327T120000Z.zip",
+        )
+
+    def test_api_download_named_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+        storage_backend.open.return_value = BytesIO(b"zip-content")
+
+        with mock.patch(
+            "paperless.views.get_s3_configuration_storage",
+            return_value=storage_backend,
+        ):
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/download-export/",
+                json.dumps(
+                    {
+                        "export_name": "paperless-manual-export-20260327T120000Z.zip",
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-manual-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")
+
+    def test_api_download_automatic_s3_export(self):
+        storage = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            prefix="backup",
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+            access_key_id="backup-access",
+            secret_access_key="backup-secret",
+        )
+        storage_backend = mock.Mock()
+        storage_backend.exists.return_value = True
+        storage_backend.open.return_value = BytesIO(b"zip-content")
+
+        with mock.patch(
+            "paperless.views.S3StorageConfigurationViewSet._get_storage_backend_for_export",
+            return_value=storage_backend,
+        ):
+            response = self.client.post(
+                f"{self.ENDPOINT}{storage.pk}/download-export/",
+                json.dumps(
+                    {
+                        "export_name": (
+                            "2026-03-27/paperless-automatic-export-20260327T120000Z.zip"
+                        ),
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'filename="paperless-automatic-export-20260327T120000Z.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(b"".join(response.streaming_content), b"zip-content")

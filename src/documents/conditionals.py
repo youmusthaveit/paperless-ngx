@@ -1,4 +1,3 @@
-from datetime import UTC
 from datetime import datetime
 from typing import Any
 
@@ -123,10 +122,9 @@ def thumbnail_last_modified(request: Any, pk: int) -> datetime | None:
     Cache should be (slightly?) faster than filesystem
     """
     try:
-        doc = resolve_effective_document_by_pk(pk, request).document
-        if doc is None:
-            return None
-        if not doc.thumbnail_path.exists():
+        doc = Document.objects.only("storage_type").get(pk=pk)
+        last_modified = doc.thumbnail_modified_time()
+        if last_modified is None:
             return None
         # Use the effective document id for cache key
         doc_key = get_thumbnail_modified_key(doc.id)
@@ -137,10 +135,6 @@ def thumbnail_last_modified(request: Any, pk: int) -> datetime | None:
             return cache_hit
 
         # No cache, get the timestamp and cache the datetime
-        last_modified = datetime.fromtimestamp(
-            doc.thumbnail_path.stat().st_mtime,
-            tz=UTC,
-        )
         cache.set(doc_key, last_modified, CACHE_50_MINUTES)
         return last_modified
     except (Document.DoesNotExist, OSError):  # pragma: no cover

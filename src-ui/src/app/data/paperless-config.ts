@@ -49,6 +49,8 @@ export enum ConfigOptionType {
 
 export const ConfigCategory = {
   General: $localize`General Settings`,
+  Storage: $localize`Storage Settings`,
+  Backup: $localize`Backup Settings`,
   OCR: $localize`OCR Settings`,
   Barcode: $localize`Barcode Settings`,
   AI: $localize`AI Settings`,
@@ -64,23 +66,41 @@ export const LLMBackendConfig = {
   OLLAMA: 'ollama',
 }
 
+export enum DocumentStorageTypeConfig {
+  LOCAL = 'local',
+  S3 = 's3',
+}
+
 export interface ConfigOption {
   key: string
   title: string
   type: ConfigOptionType
-  choices?: Array<{ id: string; name: string }>
+  choices?: Array<{ id: string | number; name: string }>
   config_key?: string
   category: string
   note?: string
 }
 
-function mapToItems(enumObj: Object): Array<{ id: string; name: string }> {
+function mapToItems(
+  enumObj: Object
+): Array<{ id: string | number; name: string }> {
   return Object.keys(enumObj).map((key) => {
     return {
       id: enumObj[key],
       name: enumObj[key],
     }
   })
+}
+
+export interface BackupScheduleJob {
+  name: string
+  enabled: boolean
+  storage: number | null
+  frequency_days: number | null
+  hour: number | null
+  minute: number | null
+  retain_count: number | null
+  last_run?: string | null
 }
 
 export const PaperlessConfigOptions: ConfigOption[] = [
@@ -193,6 +213,30 @@ export const PaperlessConfigOptions: ConfigOption[] = [
     type: ConfigOptionType.String,
     config_key: 'PAPERLESS_APP_TITLE',
     category: ConfigCategory.General,
+  },
+  {
+    key: 'documents_storage_type',
+    title: $localize`Document Storage Backend`,
+    type: ConfigOptionType.Select,
+    choices: mapToItems(DocumentStorageTypeConfig),
+    config_key: 'PAPERLESS_DOCUMENTS_STORAGE_TYPE',
+    category: ConfigCategory.Storage,
+  },
+  {
+    key: 'documents_s3_storage',
+    title: $localize`Primary S3 Storage`,
+    type: ConfigOptionType.Select,
+    choices: [],
+    config_key: 'PAPERLESS_DOCUMENTS_S3_STORAGE',
+    category: ConfigCategory.Storage,
+  },
+  {
+    key: 'documents_backup_s3_storage',
+    title: $localize`Backup S3 Storage`,
+    type: ConfigOptionType.Select,
+    choices: [],
+    config_key: 'PAPERLESS_DOCUMENTS_BACKUP_S3_STORAGE',
+    category: ConfigCategory.Backup,
   },
   {
     key: 'barcodes_enabled',
@@ -348,6 +392,34 @@ export interface PaperlessConfig extends ObjectWithId {
   user_args: object
   app_logo: string
   app_title: string
+  documents_storage_type: DocumentStorageTypeConfig
+  documents_storage_prefix: string
+  documents_s3_storage: number
+  documents_s3_bucket: string
+  documents_s3_endpoint_url: string
+  documents_s3_access_key_id: string
+  documents_s3_secret_access_key: string
+  documents_s3_region_name: string
+  documents_s3_default_acl: string
+  documents_s3_custom_domain: string
+  documents_s3_url_protocol: string
+  documents_s3_addressing_style: string
+  documents_s3_querystring_auth: boolean
+  documents_s3_use_ssl: boolean
+  documents_backup_prefix: string
+  documents_backup_s3_storage: number
+  documents_backup_schedule_jobs: BackupScheduleJob[]
+  documents_backup_s3_bucket: string
+  documents_backup_s3_endpoint_url: string
+  documents_backup_s3_access_key_id: string
+  documents_backup_s3_secret_access_key: string
+  documents_backup_s3_region_name: string
+  documents_backup_s3_default_acl: string
+  documents_backup_s3_custom_domain: string
+  documents_backup_s3_url_protocol: string
+  documents_backup_s3_addressing_style: string
+  documents_backup_s3_querystring_auth: boolean
+  documents_backup_s3_use_ssl: boolean
   barcodes_enabled: boolean
   barcode_enable_tiff_support: boolean
   barcode_string: string

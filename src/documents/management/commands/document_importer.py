@@ -2,29 +2,32 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from contextlib import suppress
 from pathlib import Path
 from zipfile import ZipFile
 from zipfile import is_zipfile
 
-import ijson
+import tqdm
+from celery import states
 from django.conf import settings
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import FieldDoesNotExist
 from django.core.management import call_command
+from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 from django.core.serializers.base import DeserializationError
 from django.db import IntegrityError
 from django.db import transaction
 from django.db.models.signals import m2m_changed
 from django.db.models.signals import post_save
+from django.utils import timezone
 from filelock import FileLock
 
-from documents.file_handling import create_source_path_directory
-from documents.management.commands.base import PaperlessCommand
 from documents.management.commands.mixins import CryptMixin
 from documents.models import Correspondent
 from documents.models import CustomField
@@ -32,27 +35,22 @@ from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import Note
+from documents.models import PaperlessTask
 from documents.models import Tag
+from documents.parsers import run_convert
 from documents.settings import EXPORTER_ARCHIVE_NAME
 from documents.settings import EXPORTER_CRYPTO_SETTINGS_NAME
 from documents.settings import EXPORTER_FILE_NAME
 from documents.settings import EXPORTER_THUMBNAIL_NAME
 from documents.signals.handlers import check_paths_and_prune_custom_fields
 from documents.signals.handlers import update_filename_and_move_files
-from documents.utils import copy_file_with_basic_stats
+from documents.storage import document_delete
+from documents.storage import document_exists
+from documents.storage import document_write_from_path
 from paperless import version
 
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.registry import auditlog
-
-
-def iter_manifest_records(path: Path) -> Generator[dict, None, None]:
-    """Yield records one at a time from a manifest JSON array via ijson."""
-    try:
-        with path.open("rb") as f:
-            yield from ijson.items(f, "item")
-    except ijson.JSONError as e:
-        raise CommandError(f"Failed to parse manifest file {path}: {e}") from e
 
 
 @contextmanager
@@ -65,18 +63,21 @@ def disable_signal(sig, receiver, sender, *, weak: bool | None = None) -> Genera
         sig.connect(receiver=receiver, sender=sender, **kwargs)
 
 
-class Command(CryptMixin, PaperlessCommand):
+class Command(CryptMixin, BaseCommand):
     help = (
         "Using a manifest.json file, load the data from there, and import the "
         "documents it refers to."
     )
 
-    supports_progress_bar = True
-    supports_multiprocessing = False
-
     def add_arguments(self, parser) -> None:
-        super().add_arguments(parser)
         parser.add_argument("source")
+
+        parser.add_argument(
+            "--no-progress-bar",
+            default=False,
+            action="store_true",
+            help="If set, the progress bar will not be shown",
+        )
 
         parser.add_argument(
             "--data-only",
@@ -88,6 +89,11 @@ class Command(CryptMixin, PaperlessCommand):
         parser.add_argument(
             "--passphrase",
             help="If provided, is used to sensitive fields in the export",
+        )
+        parser.add_argument(
+            "--task-owner-id",
+            type=int,
+            help="If provided, create per-file import tasks for this user",
         )
 
     def pre_check(self) -> None:
@@ -152,9 +158,14 @@ class Command(CryptMixin, PaperlessCommand):
         Loads manifest data from the various JSON files for parsing and loading the database
         """
         main_manifest_path: Path = self.source / "manifest.json"
+
+        with main_manifest_path.open() as infile:
+            self.manifest = json.load(infile)
         self.manifest_paths.append(main_manifest_path)
 
         for file in Path(self.source).glob("**/*-manifest.json"):
+            with file.open() as infile:
+                self.manifest += json.load(infile)
             self.manifest_paths.append(file)
 
     def load_metadata(self) -> None:
@@ -205,7 +216,7 @@ class Command(CryptMixin, PaperlessCommand):
                 ContentType.objects.all().delete()
                 Permission.objects.all().delete()
                 for manifest_path in self.manifest_paths:
-                    call_command("loaddata", manifest_path, skip_checks=True)
+                    call_command("loaddata", manifest_path)
         except (FieldDoesNotExist, DeserializationError, IntegrityError) as e:
             self.stdout.write(self.style.ERROR("Database import failed"))
             if (
@@ -226,15 +237,28 @@ class Command(CryptMixin, PaperlessCommand):
                 )
                 raise e
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args, **options) -> str | None:
         logging.getLogger().handlers[0].level = logging.ERROR
 
         self.source = Path(options["source"]).resolve()
         self.data_only: bool = options["data_only"]
+        self.no_progress_bar: bool = options["no_progress_bar"]
         self.passphrase: str | None = options.get("passphrase")
+        task_owner_id: int | None = options.get("task_owner_id")
         self.version: str | None = None
         self.salt: str | None = None
         self.manifest_paths = []
+        self.manifest = []
+        self.task_owner: User | None = None
+        self.import_tasks_by_document_id: dict[int, PaperlessTask] = {}
+        self.preexisting_original_paths: set[str] = set()
+        self.imported_documents = 0
+        self.failed_documents = 0
+
+        if task_owner_id is not None:
+            self.task_owner = User.objects.filter(pk=task_owner_id).first()
+            if self.task_owner is None:
+                raise CommandError(f"Task owner {task_owner_id} does not exist.")
 
         # Create a temporary directory for extracting a zip file into it, even if supplied source is no zip file to keep code cleaner.
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -242,14 +266,20 @@ class Command(CryptMixin, PaperlessCommand):
                 with ZipFile(self.source) as zf:
                     zf.extractall(tmp_dir)
                 self.source = Path(tmp_dir)
-            self._run_import()
+            return self._run_import()
 
-    def _run_import(self) -> None:
+    def _run_import(self):
         self.pre_check()
         self.load_metadata()
         self.load_manifest_files()
         self.check_manifest_validity()
         self.decrypt_secret_fields()
+        self.preexisting_original_paths = set(
+            Document.global_objects.exclude(filename__isnull=True).values_list(
+                "filename",
+                flat=True,
+            ),
+        )
 
         # see /src/documents/signals/handlers.py
         with (
@@ -294,15 +324,17 @@ class Command(CryptMixin, PaperlessCommand):
             else:
                 self.stdout.write(self.style.NOTICE("Data only import completed"))
 
-            for tmp in getattr(self, "_decrypted_tmp_paths", []):
-                tmp.unlink(missing_ok=True)
-
         self.stdout.write("Updating search index...")
         call_command(
             "document_index",
             "reindex",
             no_progress_bar=self.no_progress_bar,
         )
+        if not self.data_only:
+            return (
+                f"Imported {self.imported_documents} document(s); "
+                f"{self.failed_documents} failed."
+            )
 
     def check_manifest_validity(self) -> None:
         """
@@ -349,12 +381,11 @@ class Command(CryptMixin, PaperlessCommand):
                     ) from e
 
         self.stdout.write("Checking the manifest")
-        for manifest_path in self.manifest_paths:
-            for record in iter_manifest_records(manifest_path):
-                # Only check if the document files exist if this is not data only
-                # We don't care about documents for a data only import
-                if not self.data_only and record["model"] == "documents.document":
-                    check_document_validity(record)
+        for record in self.manifest:
+            # Only check if the document files exist if this is not data only
+            # We don't care about documents for a data only import
+            if not self.data_only and record["model"] == "documents.document":
+                check_document_validity(record)
 
     def _import_files_from_manifest(self) -> None:
         settings.ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -363,96 +394,205 @@ class Command(CryptMixin, PaperlessCommand):
 
         self.stdout.write("Copy files into paperless...")
 
-        document_records = [
-            {
-                "pk": record["pk"],
-                EXPORTER_FILE_NAME: record[EXPORTER_FILE_NAME],
-                EXPORTER_THUMBNAIL_NAME: record.get(EXPORTER_THUMBNAIL_NAME),
-                EXPORTER_ARCHIVE_NAME: record.get(EXPORTER_ARCHIVE_NAME),
-            }
-            for manifest_path in self.manifest_paths
-            for record in iter_manifest_records(manifest_path)
-            if record["model"] == "documents.document"
-        ]
+        manifest_documents = list(
+            filter(lambda r: r["model"] == "documents.document", self.manifest),
+        )
+        self._initialize_import_tasks(manifest_documents)
 
-        for record in self.track(document_records, description="Copying files..."):
+        for record in tqdm.tqdm(manifest_documents, disable=self.no_progress_bar):
             document = Document.objects.get(pk=record["pk"])
 
             doc_file = record[EXPORTER_FILE_NAME]
             document_path = self.source / doc_file
 
-            if record[EXPORTER_THUMBNAIL_NAME]:
+            if EXPORTER_THUMBNAIL_NAME in record:
                 thumb_file = record[EXPORTER_THUMBNAIL_NAME]
                 thumbnail_path = (self.source / thumb_file).resolve()
             else:
                 thumbnail_path = None
 
-            if record[EXPORTER_ARCHIVE_NAME]:
+            if EXPORTER_ARCHIVE_NAME in record:
                 archive_file = record[EXPORTER_ARCHIVE_NAME]
                 archive_path = self.source / archive_file
             else:
                 archive_path = None
 
-            with FileLock(settings.MEDIA_LOCK):
-                if Path(document.source_path).is_file():
-                    raise FileExistsError(document.source_path)
+            document.storage_type = Document.STORAGE_TYPE_UNENCRYPTED
 
-                create_source_path_directory(document.source_path)
+            task_file_name = document.source_name
+            self._update_import_task(
+                document.pk,
+                status=states.STARTED,
+                result=f'Importing "{task_file_name}"...',
+            )
 
-                copy_file_with_basic_stats(document_path, document.source_path)
+            try:
+                with FileLock(settings.MEDIA_LOCK):
+                    if document_exists("originals", document.source_name):
+                        if self._is_orphaned_original(document.source_name):
+                            document_delete("originals", document.source_name)
+                        else:
+                            raise FileExistsError(document.source_name)
 
-                if thumbnail_path:
-                    copy_file_with_basic_stats(
-                        thumbnail_path,
-                        document.thumbnail_path,
+                    document_write_from_path(
+                        "originals",
+                        document.source_name,
+                        document_path,
                     )
 
-                if archive_path:
-                    create_source_path_directory(document.archive_path)
-                    # TODO: this assumes that the export is valid and
-                    #  archive_filename is present on all documents with
-                    #  archived files
-                    copy_file_with_basic_stats(archive_path, document.archive_path)
+                    if thumbnail_path:
+                        if thumbnail_path.suffix in {".png", ".PNG"}:
+                            with tempfile.TemporaryDirectory(
+                                prefix="paperless-import-thumb-",
+                            ) as temp_dir:
+                                temp_thumbnail = (
+                                    Path(temp_dir) / document.thumbnail_name
+                                )
+                                run_convert(
+                                    density=300,
+                                    scale="500x5000>",
+                                    alpha="remove",
+                                    strip=True,
+                                    trim=False,
+                                    auto_orient=True,
+                                    input_file=f"{thumbnail_path}[0]",
+                                    output_file=str(temp_thumbnail),
+                                )
+                                document_write_from_path(
+                                    "thumbnails",
+                                    document.thumbnail_name,
+                                    temp_thumbnail,
+                                )
+                        else:
+                            document_write_from_path(
+                                "thumbnails",
+                                document.thumbnail_name,
+                                thumbnail_path,
+                            )
 
-            document.save()
+                    if archive_path:
+                        # TODO: this assumes that the export is valid and
+                        #  archive_filename is present on all documents with
+                        #  archived files
+                        document_write_from_path(
+                            "archive",
+                            str(document.archive_filename),
+                            archive_path,
+                        )
 
-    def _decrypt_record_if_needed(self, record: dict) -> dict:
-        fields = self.CRYPT_FIELDS_BY_MODEL.get(record.get("model", ""))
-        if fields:
-            for field in fields:
-                if record["fields"].get(field):
-                    record["fields"][field] = self.decrypt_string(
-                        value=record["fields"][field],
-                    )
-        return record
+                document.save()
+            except Exception as exc:
+                self.failed_documents += 1
+                self._cleanup_failed_import(document)
+                self._update_import_task(
+                    document.pk,
+                    status=states.FAILURE,
+                    result=self._build_failure_result(task_file_name, exc),
+                )
+                continue
+
+            self.imported_documents += 1
+            self._update_import_task(
+                document.pk,
+                status=states.SUCCESS,
+                result=f'Imported "{task_file_name}". New document id {document.pk} created.',
+            )
+
+    def _build_failure_result(self, task_file_name: str, exc: Exception) -> str:
+        if isinstance(exc, FileExistsError):
+            return (
+                f'Import skipped for "{task_file_name}": '
+                "a file with this storage path already exists."
+            )
+
+        return f'Import failed for "{task_file_name}": {exc}'
+
+    def _cleanup_failed_import(self, document: Document) -> None:
+        with FileLock(settings.MEDIA_LOCK):
+            if document.source_exists():
+                document_delete("originals", document.source_name)
+            if document.thumbnail_exists():
+                document_delete("thumbnails", document.thumbnail_name)
+            if document.archive_exists():
+                document_delete("archive", document.archive_name)
+
+        persisted_document = Document.global_objects.filter(pk=document.pk).first()
+        if persisted_document is None:
+            return
+
+        with suppress(Exception):
+            persisted_document.hard_delete()
+
+    def _is_orphaned_original(self, source_name: str) -> bool:
+        return source_name not in self.preexisting_original_paths
+
+    def _initialize_import_tasks(self, manifest_documents: list[dict]) -> None:
+        if self.task_owner is None:
+            return
+
+        now = timezone.now()
+        for record in manifest_documents:
+            document = Document.objects.get(pk=record["pk"])
+            task = PaperlessTask.objects.create(
+                type=PaperlessTask.TaskType.MANUAL_TASK,
+                task_id=str(uuid.uuid4()),
+                task_file_name=document.source_name,
+                task_name=PaperlessTask.TaskName.IMPORT_FILE,
+                status=states.PENDING,
+                result=f'Queued import for "{document.source_name}".',
+                date_created=now,
+                owner=self.task_owner,
+            )
+            self.import_tasks_by_document_id[document.pk] = task
+
+    def _update_import_task(
+        self,
+        document_id: int,
+        status: str,
+        result: str,
+    ) -> None:
+        task = self.import_tasks_by_document_id.get(document_id)
+        if task is None:
+            return
+
+        now = timezone.now()
+        task.status = status
+        task.result = result
+        if status == states.STARTED and task.date_started is None:
+            task.date_started = now
+        if status in {states.SUCCESS, states.FAILURE}:
+            if task.date_started is None:
+                task.date_started = now
+            task.date_done = now
+        task.save(update_fields=["status", "result", "date_started", "date_done"])
 
     def decrypt_secret_fields(self) -> None:
         """
-        The converse decryption of some fields out of the export before importing to database.
-        Streams records from each manifest path and writes decrypted content to a temp file.
+        The converse decryption of some fields out of the export before importing to database
         """
-        if not self.passphrase:
-            return
-        # Salt has been loaded from metadata.json at this point, so it cannot be None
-        self.setup_crypto(passphrase=self.passphrase, salt=self.salt)
-        self._decrypted_tmp_paths: list[Path] = []
-        new_paths: list[Path] = []
-        for manifest_path in self.manifest_paths:
-            tmp = manifest_path.with_name(manifest_path.stem + ".decrypted.json")
-            with tmp.open("w", encoding="utf-8") as out:
-                out.write("[\n")
-                first = True
-                for record in iter_manifest_records(manifest_path):
-                    if not first:
-                        out.write(",\n")
-                    json.dump(
-                        self._decrypt_record_if_needed(record),
-                        out,
-                        indent=2,
-                        ensure_ascii=False,
-                    )
-                    first = False
-                out.write("\n]\n")
-            self._decrypted_tmp_paths.append(tmp)
-            new_paths.append(tmp)
-        self.manifest_paths = new_paths
+        if self.passphrase:
+            # Salt has been loaded from metadata.json at this point, so it cannot be None
+            self.setup_crypto(passphrase=self.passphrase, salt=self.salt)
+
+            had_at_least_one_record = False
+
+            for crypt_config in self.CRYPT_FIELDS:
+                importer_model: str = crypt_config["model_name"]
+                crypt_fields: str = crypt_config["fields"]
+                for record in filter(
+                    lambda x: x["model"] == importer_model,
+                    self.manifest,
+                ):
+                    had_at_least_one_record = True
+                    for field in crypt_fields:
+                        if record["fields"][field]:
+                            record["fields"][field] = self.decrypt_string(
+                                value=record["fields"][field],
+                            )
+
+            if had_at_least_one_record:
+                # It's annoying, but the DB is loaded from the JSON directly
+                # Maybe could change that in the future?
+                (self.source / "manifest.json").write_text(
+                    json.dumps(self.manifest, indent=2, ensure_ascii=False),
+                )

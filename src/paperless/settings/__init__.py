@@ -72,6 +72,70 @@ SHARE_LINK_BUNDLE_DIR = MEDIA_ROOT / "documents" / "share_link_bundles"
 
 DATA_DIR = get_path_from_env("PAPERLESS_DATA_DIR", BASE_DIR.parent / "data")
 
+DOCUMENTS_STORAGE_TYPE = (
+    os.getenv("PAPERLESS_DOCUMENTS_STORAGE_TYPE", "local") or "local"
+).lower()
+DOCUMENTS_STORAGE_PREFIX = (
+    os.getenv("PAPERLESS_DOCUMENTS_STORAGE_PREFIX", "documents") or "documents"
+).strip("/")
+DOCUMENTS_S3_BUCKET = os.getenv("PAPERLESS_DOCUMENTS_S3_BUCKET")
+DOCUMENTS_S3_ENDPOINT_URL = os.getenv("PAPERLESS_DOCUMENTS_S3_ENDPOINT_URL")
+DOCUMENTS_S3_ACCESS_KEY_ID = os.getenv("PAPERLESS_DOCUMENTS_S3_ACCESS_KEY_ID")
+DOCUMENTS_S3_SECRET_ACCESS_KEY = os.getenv(
+    "PAPERLESS_DOCUMENTS_S3_SECRET_ACCESS_KEY",
+)
+DOCUMENTS_S3_REGION_NAME = os.getenv("PAPERLESS_DOCUMENTS_S3_REGION_NAME")
+DOCUMENTS_S3_DEFAULT_ACL = os.getenv("PAPERLESS_DOCUMENTS_S3_DEFAULT_ACL")
+DOCUMENTS_S3_CUSTOM_DOMAIN = os.getenv("PAPERLESS_DOCUMENTS_S3_CUSTOM_DOMAIN")
+DOCUMENTS_S3_URL_PROTOCOL = os.getenv(
+    "PAPERLESS_DOCUMENTS_S3_URL_PROTOCOL",
+    "https:",
+)
+DOCUMENTS_S3_ADDRESSING_STYLE = os.getenv("PAPERLESS_DOCUMENTS_S3_ADDRESSING_STYLE")
+DOCUMENTS_S3_QUERYSTRING_AUTH = get_bool_from_env(
+    "PAPERLESS_DOCUMENTS_S3_QUERYSTRING_AUTH",
+    "false",
+)
+DOCUMENTS_S3_USE_SSL = get_bool_from_env("PAPERLESS_DOCUMENTS_S3_USE_SSL", "true")
+DOCUMENTS_BACKUP_PREFIX = (
+    os.getenv("PAPERLESS_DOCUMENTS_BACKUP_PREFIX", "documents-backup")
+    or "documents-backup"
+).strip("/")
+DOCUMENTS_BACKUP_S3_BUCKET = os.getenv("PAPERLESS_DOCUMENTS_BACKUP_S3_BUCKET")
+DOCUMENTS_BACKUP_S3_ENDPOINT_URL = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_ENDPOINT_URL",
+)
+DOCUMENTS_BACKUP_S3_ACCESS_KEY_ID = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_ACCESS_KEY_ID",
+)
+DOCUMENTS_BACKUP_S3_SECRET_ACCESS_KEY = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_SECRET_ACCESS_KEY",
+)
+DOCUMENTS_BACKUP_S3_REGION_NAME = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_REGION_NAME",
+)
+DOCUMENTS_BACKUP_S3_DEFAULT_ACL = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_DEFAULT_ACL",
+)
+DOCUMENTS_BACKUP_S3_CUSTOM_DOMAIN = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_CUSTOM_DOMAIN",
+)
+DOCUMENTS_BACKUP_S3_URL_PROTOCOL = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_URL_PROTOCOL",
+    "https:",
+)
+DOCUMENTS_BACKUP_S3_ADDRESSING_STYLE = os.getenv(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_ADDRESSING_STYLE",
+)
+DOCUMENTS_BACKUP_S3_QUERYSTRING_AUTH = get_bool_from_env(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_QUERYSTRING_AUTH",
+    "false",
+)
+DOCUMENTS_BACKUP_S3_USE_SSL = get_bool_from_env(
+    "PAPERLESS_DOCUMENTS_BACKUP_S3_USE_SSL",
+    "true",
+)
+
 NLTK_DIR = get_path_from_env("PAPERLESS_NLTK_DIR", "/usr/share/nltk_data")
 
 # Check deprecated setting first
@@ -225,11 +289,50 @@ ASGI_APPLICATION = "paperless.asgi.application"
 STATIC_URL = os.getenv("PAPERLESS_STATIC_URL", BASE_URL + "static/")
 WHITENOISE_STATIC_PREFIX = "/static/"
 
+
+def _build_document_storage(location: Path, prefix: str) -> dict[str, object]:
+    if DOCUMENTS_STORAGE_TYPE == "s3":
+        options: dict[str, object] = {
+            "bucket_name": DOCUMENTS_S3_BUCKET,
+            "location": "/".join(
+                part for part in [DOCUMENTS_STORAGE_PREFIX, prefix] if part
+            ),
+            "default_acl": DOCUMENTS_S3_DEFAULT_ACL,
+            "querystring_auth": DOCUMENTS_S3_QUERYSTRING_AUTH,
+            "use_ssl": DOCUMENTS_S3_USE_SSL,
+            "file_overwrite": True,
+        }
+        optional_options = {
+            "endpoint_url": DOCUMENTS_S3_ENDPOINT_URL,
+            "access_key": DOCUMENTS_S3_ACCESS_KEY_ID,
+            "secret_key": DOCUMENTS_S3_SECRET_ACCESS_KEY,
+            "region_name": DOCUMENTS_S3_REGION_NAME,
+            "custom_domain": DOCUMENTS_S3_CUSTOM_DOMAIN,
+            "url_protocol": DOCUMENTS_S3_URL_PROTOCOL,
+        }
+        options.update({key: value for key, value in optional_options.items() if value})
+        if DOCUMENTS_S3_ADDRESSING_STYLE:
+            options["addressing_style"] = DOCUMENTS_S3_ADDRESSING_STYLE
+
+        return {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": options,
+        }
+
+    return {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": str(location)},
+    }
+
+
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "documents_originals": _build_document_storage(ORIGINALS_DIR, "originals"),
+    "documents_archive": _build_document_storage(ARCHIVE_DIR, "archive"),
+    "documents_thumbnails": _build_document_storage(THUMBNAIL_DIR, "thumbnails"),
 }
 
 _CELERY_REDIS_URL, _CHANNELS_REDIS_URL = parse_redis_url(

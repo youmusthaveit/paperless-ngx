@@ -5,6 +5,8 @@ import uuid
 import zipfile
 from collections.abc import Callable
 from collections.abc import Iterable
+from copy import deepcopy
+from datetime import time as datetime_time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from tempfile import mkstemp
@@ -15,6 +17,8 @@ from celery import shared_task
 from celery import states
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.core.files import File
+from django.core.management import call_command
 from django.db import models
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -37,7 +41,6 @@ from documents.consumer import WorkflowTriggerPlugin
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.double_sided import CollatePlugin
-from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_unique_filename
 from documents.matching import prefilter_documents_by_workflowtrigger
 from documents.models import Correspondent
@@ -60,9 +63,13 @@ from documents.signals import document_updated
 from documents.signals.handlers import cleanup_document_deletion
 from documents.signals.handlers import run_workflows
 from documents.signals.handlers import send_websocket_document_updated
+from documents.storage import document_write_from_path
+from documents.storage import get_s3_configuration_storage
 from documents.utils import compute_checksum
 from documents.workflows.utils import get_workflows_for_trigger
 from paperless.config import AIConfig
+from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.parsers import ParserContext
 from paperless.parsers.registry import get_parser_registry
 from paperless_ai.indexing import llm_index_add_or_update_document
@@ -72,10 +79,29 @@ from paperless_ai.indexing import update_llm_index
 _T = TypeVar("_T")
 IterWrapper = Callable[[Iterable[_T]], Iterable[_T]]
 
-
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
 logger = logging.getLogger("paperless.tasks")
+
+MANUAL_S3_TRANSFER_LOCATION = "manual-transfer"
+AUTOMATIC_S3_TRANSFER_LOCATION = "automatic-transfer"
+MANUAL_S3_EXPORT_FILENAME_PREFIX = "paperless-manual-export"
+AUTOMATIC_S3_EXPORT_FILENAME_PREFIX = "paperless-automatic-export"
+AUTOMATIC_S3_BACKUP_CHECK_RESULT_NOT_DUE = "Automatic backup not due."
+
+
+def build_manual_s3_export_filename() -> str:
+    timestamp = timezone.now().strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{MANUAL_S3_EXPORT_FILENAME_PREFIX}-{timestamp}.zip"
+
+
+def build_automatic_s3_export_path() -> str:
+    now = timezone.localtime(timezone.now())
+    date_folder = now.strftime("%Y-%m-%d")
+    export_filename = (
+        f"{AUTOMATIC_S3_EXPORT_FILENAME_PREFIX}-{now.strftime('%Y%m%dT%H%M%S%fZ')}.zip"
+    )
+    return f"{date_folder}/{export_filename}"
 
 
 def _identity(iterable: Iterable[_T]) -> Iterable[_T]:
@@ -268,6 +294,340 @@ def sanity_check(*, scheduled=True, raise_on_error=True):
     return summary
 
 
+def _get_manual_s3_transfer_storage(storage_id: int):
+    storage_config = S3StorageConfiguration.objects.get(pk=storage_id)
+    storage = get_s3_configuration_storage(
+        storage_config,
+        location=MANUAL_S3_TRANSFER_LOCATION,
+    )
+    return storage_config, storage
+
+
+def _get_automatic_s3_transfer_storage(storage_id: int):
+    storage_config = S3StorageConfiguration.objects.get(pk=storage_id)
+    storage = get_s3_configuration_storage(
+        storage_config,
+        location=AUTOMATIC_S3_TRANSFER_LOCATION,
+    )
+    return storage_config, storage
+
+
+def _get_s3_transfer_storages(storage_id: int):
+    storage_config = S3StorageConfiguration.objects.get(pk=storage_id)
+    return (
+        storage_config,
+        [
+            (
+                MANUAL_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage_config,
+                    location=MANUAL_S3_TRANSFER_LOCATION,
+                ),
+            ),
+            (
+                AUTOMATIC_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage_config,
+                    location=AUTOMATIC_S3_TRANSFER_LOCATION,
+                ),
+            ),
+        ],
+    )
+
+
+def _normalize_automatic_backup_jobs(
+    config: ApplicationConfiguration,
+) -> list[dict]:
+    jobs = config.documents_backup_schedule_jobs or []
+    if jobs:
+        return jobs
+
+    if (
+        config.documents_backup_schedule_enabled
+        and config.documents_backup_schedule_storage_id is not None
+        and config.documents_backup_schedule_frequency_days is not None
+        and config.documents_backup_schedule_hour is not None
+        and config.documents_backup_schedule_minute is not None
+    ):
+        return [
+            {
+                "name": "Default automatic backup",
+                "enabled": True,
+                "storage": config.documents_backup_schedule_storage_id,
+                "frequency_days": config.documents_backup_schedule_frequency_days,
+                "hour": config.documents_backup_schedule_hour,
+                "minute": config.documents_backup_schedule_minute,
+                "retain_count": config.documents_backup_schedule_retain_count or 1,
+                "last_run": (
+                    config.documents_backup_schedule_last_run.isoformat()
+                    if config.documents_backup_schedule_last_run
+                    else None
+                ),
+            },
+        ]
+
+    return []
+
+
+def _is_automatic_backup_due(
+    job: dict,
+    *,
+    now: datetime.datetime,
+) -> bool:
+    if (
+        not job.get("enabled", True)
+        or job.get("storage") is None
+        or job.get("frequency_days") is None
+        or job.get("hour") is None
+        or job.get("minute") is None
+    ):
+        return False
+
+    local_now = timezone.localtime(now)
+    today_due = timezone.make_aware(
+        datetime.datetime.combine(
+            local_now.date(),
+            datetime_time(
+                hour=job["hour"],
+                minute=job["minute"],
+            ),
+        ),
+        timezone.get_current_timezone(),
+    )
+
+    last_run = job.get("last_run")
+    if last_run is None:
+        return local_now >= today_due
+
+    try:
+        last_run_local = timezone.localtime(datetime.datetime.fromisoformat(last_run))
+    except (TypeError, ValueError):
+        return local_now >= today_due
+    next_due = timezone.make_aware(
+        datetime.datetime.combine(
+            last_run_local.date() + datetime.timedelta(days=job["frequency_days"]),
+            datetime_time(
+                hour=job["hour"],
+                minute=job["minute"],
+            ),
+        ),
+        timezone.get_current_timezone(),
+    )
+    return local_now >= next_due
+
+
+def _rotate_automatic_s3_exports(
+    storage_id: int,
+    retain_count: int,
+) -> list[str]:
+    _, storage = _get_automatic_s3_transfer_storage(storage_id)
+
+    def collect_exports(path: str = "") -> list[str]:
+        directories, filenames = storage.listdir(path)
+        export_names = [
+            f"{path}/{filename}" if path else filename
+            for filename in filenames
+            if filename.endswith(".zip")
+        ]
+        for directory in directories:
+            nested_path = f"{path}/{directory}" if path else directory
+            export_names.extend(collect_exports(nested_path))
+        return export_names
+
+    export_names = sorted(collect_exports(), reverse=True)
+    deleted_exports: list[str] = []
+    for export_name in export_names[retain_count:]:
+        storage.delete(export_name)
+        deleted_exports.append(export_name)
+    return deleted_exports
+
+
+@shared_task
+def export_documents_to_s3_storage(storage_id: int):
+    storage_config, storage = _get_manual_s3_transfer_storage(storage_id)
+    export_filename = build_manual_s3_export_filename()
+    while storage.exists(export_filename):
+        export_filename = build_manual_s3_export_filename()
+
+    settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=settings.SCRATCH_DIR,
+        prefix="paperless-s3-export-",
+    ) as temp_dir:
+        call_command(
+            "document_exporter",
+            temp_dir,
+            zip=True,
+            zip_name=export_filename.removesuffix(".zip"),
+            use_filename_format=True,
+            use_folder_prefix=True,
+            no_progress_bar=True,
+        )
+        export_path = Path(temp_dir) / export_filename
+        with export_path.open("rb") as handle:
+            storage.save(export_filename, File(handle, name=export_path.name))
+
+    return (
+        f'Successfully exported documents to S3 storage "{storage_config.name}" '
+        f"as {export_filename}."
+    )
+
+
+def _export_documents_to_automatic_s3_storage(storage_id: int):
+    storage_config, storage = _get_automatic_s3_transfer_storage(storage_id)
+    export_path = build_automatic_s3_export_path()
+    while storage.exists(export_path):
+        export_path = build_automatic_s3_export_path()
+
+    settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=settings.SCRATCH_DIR,
+        prefix="paperless-s3-export-",
+    ) as temp_dir:
+        call_command(
+            "document_exporter",
+            temp_dir,
+            zip=True,
+            zip_name=Path(export_path).stem,
+            use_filename_format=True,
+            use_folder_prefix=True,
+            no_progress_bar=True,
+        )
+        export_file_path = Path(temp_dir) / Path(export_path).name
+        with export_file_path.open("rb") as handle:
+            storage.save(export_path, File(handle, name=export_file_path.name))
+
+    return (
+        f'Successfully exported documents to automatic S3 backup storage "{storage_config.name}" '
+        f"as {export_path}."
+    )
+
+
+@shared_task
+def import_documents_from_s3_storage(
+    storage_id: int,
+    export_name: str,
+    owner_id: int | None = None,
+):
+    storage_config, storages = _get_s3_transfer_storages(storage_id)
+    storage = None
+    for _, candidate_storage in storages:
+        if candidate_storage.exists(export_name):
+            storage = candidate_storage
+            break
+
+    if storage is None:
+        raise FileNotFoundError(
+            f'No export snapshot "{export_name}" found in S3 storage '
+            f'"{storage_config.name}".',
+        )
+
+    settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=settings.SCRATCH_DIR,
+        prefix="paperless-s3-import-",
+    ) as temp_dir:
+        import_path = Path(temp_dir) / export_name
+        with (
+            storage.open(export_name, "rb") as source_handle,
+            import_path.open("wb") as target_handle,
+        ):
+            shutil.copyfileobj(source_handle, target_handle)
+
+        result = call_command(
+            "document_importer",
+            import_path,
+            no_progress_bar=True,
+            task_owner_id=owner_id,
+        )
+
+    return result or (
+        f'Successfully imported documents from S3 storage "{storage_config.name}" '
+        f"using {export_name}."
+    )
+
+
+@shared_task
+def run_scheduled_s3_backup_exports():
+    config = ApplicationConfiguration.objects.first()
+    if config is None:
+        return "Automatic backups are not configured."
+
+    now = timezone.now()
+    jobs = _normalize_automatic_backup_jobs(config)
+    due_jobs = [job for job in jobs if _is_automatic_backup_due(job, now=now)]
+    if not due_jobs:
+        return AUTOMATIC_S3_BACKUP_CHECK_RESULT_NOT_DUE
+
+    updated_jobs = deepcopy(jobs)
+    results: list[str] = []
+
+    for job_index, job in enumerate(updated_jobs):
+        if not _is_automatic_backup_due(job, now=now):
+            continue
+
+        storage_id = job.get("storage")
+        if storage_id is None:
+            results.append(f'Automatic backup job "{job["name"]}" has no storage.')
+            continue
+
+        storage = S3StorageConfiguration.objects.filter(pk=storage_id).first()
+        if storage is None:
+            results.append(
+                f'Automatic backup job "{job["name"]}" references an unknown storage.',
+            )
+            continue
+
+        task_file_name = f"{job['name']} ({storage.name})"
+        if PaperlessTask.objects.filter(
+            task_name=PaperlessTask.TaskName.SCHEDULED_BACKUP_S3_STORAGE,
+            task_file_name=task_file_name,
+            status__in={states.PENDING, states.STARTED},
+        ).exists():
+            results.append(f'Automatic backup job "{job["name"]}" is already running.')
+            continue
+
+        task = PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.SCHEDULED_TASK,
+            task_id=str(uuid.uuid4()),
+            task_name=PaperlessTask.TaskName.SCHEDULED_BACKUP_S3_STORAGE,
+            task_file_name=task_file_name,
+            status=states.STARTED,
+            date_created=now,
+            date_started=now,
+        )
+
+        try:
+            export_result = _export_documents_to_automatic_s3_storage(storage.pk)
+            retain_count = job.get("retain_count") or 1
+            deleted_exports = _rotate_automatic_s3_exports(storage.pk, retain_count)
+            updated_jobs[job_index]["last_run"] = now.isoformat()
+
+            deleted_message = ""
+            if deleted_exports:
+                deleted_message = (
+                    " Rotated old backups: " + ", ".join(deleted_exports) + "."
+                )
+
+            task.status = states.SUCCESS
+            task.result = export_result + deleted_message
+        except Exception as exc:
+            logger.exception('Scheduled S3 backup job "%s" failed', job["name"])
+            task.status = states.FAILURE
+            task.result = str(exc)
+        task.date_done = timezone.now()
+        task.save(update_fields=["status", "result", "date_done"])
+        results.append(task.result)
+
+    if config.documents_backup_schedule_jobs != updated_jobs:
+        config.documents_backup_schedule_jobs = updated_jobs
+        config.save(update_fields=["documents_backup_schedule_jobs"])
+
+    if not results:
+        return AUTOMATIC_S3_BACKUP_CHECK_RESULT_NOT_DUE
+    return " ".join(results)
+
+
 @shared_task
 def bulk_update_documents(document_ids) -> None:
     documents = Document.objects.filter(id__in=document_ids)
@@ -321,9 +681,14 @@ def update_document_content_maybe_archive_file(document_id) -> None:
         parser.configure(ParserContext())
 
         try:
-            parser.parse(document.source_path, mime_type)
+            with document.local_source_path() as source_path:
+                parser.parse(source_path, mime_type, document.get_public_filename())
 
-            thumbnail = parser.get_thumbnail(document.source_path, mime_type)
+                thumbnail = parser.get_thumbnail(
+                    source_path,
+                    mime_type,
+                    document.get_public_filename(),
+                )
 
             with transaction.atomic():
                 oldDocument = Document.objects.get(pk=document.pk)
@@ -381,9 +746,16 @@ def update_document_content_maybe_archive_file(document_id) -> None:
 
                 with FileLock(settings.MEDIA_LOCK):
                     if parser.get_archive_path():
-                        create_source_path_directory(document.archive_path)
-                        shutil.move(parser.get_archive_path(), document.archive_path)
-                    shutil.move(thumbnail, document.thumbnail_path)
+                        document_write_from_path(
+                            "archive",
+                            str(document.archive_filename),
+                            Path(parser.get_archive_path()),
+                        )
+                    document_write_from_path(
+                        "thumbnails",
+                        document.thumbnail_name,
+                        Path(thumbnail),
+                    )
 
             document.refresh_from_db()
             logger.info(

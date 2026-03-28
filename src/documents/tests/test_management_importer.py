@@ -2,16 +2,18 @@ import json
 import tempfile
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 from zipfile import ZipFile
 
-import pytest
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
 from documents.management.commands.document_importer import Command
 from documents.models import Document
+from documents.models import PaperlessTask
 from documents.settings import EXPORTER_ARCHIVE_NAME
 from documents.settings import EXPORTER_FILE_NAME
 from documents.tests.utils import DirectoriesMixin
@@ -19,14 +21,13 @@ from documents.tests.utils import FileSystemAssertsMixin
 from documents.tests.utils import SampleDirMixin
 
 
-@pytest.mark.management
 class TestCommandImport(
     DirectoriesMixin,
     FileSystemAssertsMixin,
     SampleDirMixin,
     TestCase,
 ):
-    def test_check_manifest_exists(self) -> None:
+    def test_check_manifest_exists(self):
         """
         GIVEN:
             - Source directory exists
@@ -41,14 +42,13 @@ class TestCommandImport(
                 "document_importer",
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
-                skip_checks=True,
             )
         self.assertIn(
             "That directory doesn't appear to contain a manifest.json file.",
             str(e.exception),
         )
 
-    def test_check_manifest_malformed(self) -> None:
+    def test_check_manifest_malformed(self):
         """
         GIVEN:
             - Source directory exists
@@ -68,14 +68,13 @@ class TestCommandImport(
                 "document_importer",
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
-                skip_checks=True,
             )
         self.assertIn(
             "The manifest file contains a record which does not refer to an actual document file.",
             str(e.exception),
         )
 
-    def test_check_manifest_file_not_found(self) -> None:
+    def test_check_manifest_file_not_found(self):
         """
         GIVEN:
             - Source directory exists
@@ -98,11 +97,10 @@ class TestCommandImport(
                 "document_importer",
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
-                skip_checks=True,
             )
         self.assertIn('The manifest file refers to "noexist.pdf"', str(e.exception))
 
-    def test_import_permission_error(self) -> None:
+    def test_import_permission_error(self):
         """
         GIVEN:
             - Original file which cannot be read from
@@ -122,22 +120,15 @@ class TestCommandImport(
             # No read permissions
             original_path.chmod(0o222)
 
-            manifest_path = Path(temp_dir) / "manifest.json"
-            manifest_path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "model": "documents.document",
-                            EXPORTER_FILE_NAME: "original.pdf",
-                            EXPORTER_ARCHIVE_NAME: "archive.pdf",
-                        },
-                    ],
-                ),
-            )
-
             cmd = Command()
             cmd.source = Path(temp_dir)
-            cmd.manifest_paths = [manifest_path]
+            cmd.manifest = [
+                {
+                    "model": "documents.document",
+                    EXPORTER_FILE_NAME: "original.pdf",
+                    EXPORTER_ARCHIVE_NAME: "archive.pdf",
+                },
+            ]
             cmd.data_only = False
             with self.assertRaises(CommandError) as cm:
                 cmd.check_manifest_validity()
@@ -150,7 +141,7 @@ class TestCommandImport(
                 cmd.check_manifest_validity()
             self.assertIn("Failed to read from archive file", str(cm.exception))
 
-    def test_import_source_not_existing(self) -> None:
+    def test_import_source_not_existing(self):
         """
         GIVEN:
             - Source given doesn't exist
@@ -160,10 +151,10 @@ class TestCommandImport(
             - CommandError is raised indicating the issue
         """
         with self.assertRaises(CommandError) as cm:
-            call_command("document_importer", Path("/tmp/notapath"), skip_checks=True)
+            call_command("document_importer", Path("/tmp/notapath"))
         self.assertIn("That path doesn't exist", str(cm.exception))
 
-    def test_import_source_not_readable(self) -> None:
+    def test_import_source_not_readable(self):
         """
         GIVEN:
             - Source given isn't readable
@@ -176,13 +167,13 @@ class TestCommandImport(
             path = Path(temp_dir)
             path.chmod(0o222)
             with self.assertRaises(CommandError) as cm:
-                call_command("document_importer", path, skip_checks=True)
+                call_command("document_importer", path)
             self.assertIn(
                 "That path doesn't appear to be readable",
                 str(cm.exception),
             )
 
-    def test_import_source_does_not_exist(self) -> None:
+    def test_import_source_does_not_exist(self):
         """
         GIVEN:
             - Source directory does not exist
@@ -196,15 +187,10 @@ class TestCommandImport(
         self.assertIsNotFile(path)
 
         with self.assertRaises(CommandError) as e:
-            call_command(
-                "document_importer",
-                "--no-progress-bar",
-                str(path),
-                skip_checks=True,
-            )
+            call_command("document_importer", "--no-progress-bar", str(path))
         self.assertIn("That path doesn't exist", str(e.exception))
 
-    def test_import_files_exist(self) -> None:
+    def test_import_files_exist(self):
         """
         GIVEN:
             - Source directory does exist
@@ -226,7 +212,6 @@ class TestCommandImport(
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         self.assertIn(
@@ -234,7 +219,162 @@ class TestCommandImport(
             str(stdout.read()),
         )
 
-    def test_import_with_user_exists(self) -> None:
+    def test_import_files_from_manifest_creates_import_result_tasks(self):
+        owner = User.objects.create(username="import-owner")
+
+        failed_doc = Document.objects.create(
+            title="Failed",
+            content="",
+            checksum="failed-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        successful_doc = Document.objects.create(
+            title="Success",
+            content="",
+            checksum="success-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+
+        failed_source = self.dirs.scratch_dir / "failed.pdf"
+        failed_source.write_bytes(b"failed")
+        successful_source = self.dirs.scratch_dir / "success.pdf"
+        successful_source.write_bytes(b"success")
+
+        failed_target = self.dirs.originals_dir / failed_doc.source_name
+        failed_target.parent.mkdir(parents=True, exist_ok=True)
+        failed_target.write_bytes(b"existing")
+
+        cmd = Command()
+        cmd.source = self.dirs.scratch_dir
+        cmd.no_progress_bar = True
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+        cmd.preexisting_original_paths = {failed_doc.source_name}
+        cmd.imported_documents = 0
+        cmd.failed_documents = 0
+        cmd.manifest = [
+            {
+                "model": "documents.document",
+                "pk": failed_doc.pk,
+                EXPORTER_FILE_NAME: failed_source.name,
+            },
+            {
+                "model": "documents.document",
+                "pk": successful_doc.pk,
+                EXPORTER_FILE_NAME: successful_source.name,
+            },
+        ]
+
+        with mock.patch.object(Document, "save", autospec=True):
+            cmd._import_files_from_manifest()
+
+        self.assertTrue((self.dirs.originals_dir / successful_doc.source_name).exists())
+        self.assertEqual(Document.objects.count(), 1)
+        self.assertEqual(Document.global_objects.count(), 1)
+
+        tasks = PaperlessTask.objects.order_by("task_file_name")
+        self.assertEqual(tasks.count(), 2)
+
+        failed_task, successful_task = tasks
+        self.assertEqual(failed_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
+        self.assertEqual(failed_task.status, "FAILURE")
+        self.assertIn("already exists", failed_task.result)
+        self.assertIsNotNone(failed_task.date_started)
+        self.assertIsNotNone(failed_task.date_done)
+        self.assertEqual(successful_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
+        self.assertEqual(successful_task.status, "SUCCESS")
+        self.assertIn("New document id", successful_task.result)
+        self.assertIsNotNone(successful_task.date_started)
+        self.assertIsNotNone(successful_task.date_done)
+
+    def test_initialize_import_tasks_creates_pending_tasks_for_all_documents(self):
+        owner = User.objects.create(username="import-owner")
+        first_doc = Document.objects.create(
+            title="First",
+            content="",
+            checksum="first-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        second_doc = Document.objects.create(
+            title="Second",
+            content="",
+            checksum="second-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+
+        cmd = Command()
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+
+        cmd._initialize_import_tasks(
+            [
+                {"model": "documents.document", "pk": first_doc.pk},
+                {"model": "documents.document", "pk": second_doc.pk},
+            ],
+        )
+
+        tasks = PaperlessTask.objects.order_by("task_file_name")
+        self.assertEqual(tasks.count(), 2)
+        self.assertEqual(tasks[0].status, "PENDING")
+        self.assertEqual(tasks[1].status, "PENDING")
+        self.assertIsNone(tasks[0].date_started)
+        self.assertIsNone(tasks[1].date_started)
+
+    def test_import_files_from_manifest_replaces_orphaned_originals(self):
+        owner = User.objects.create(username="import-owner")
+        document = Document.objects.create(
+            title="Recovered",
+            content="",
+            checksum="recovered-checksum",
+            mime_type="application/pdf",
+            added=timezone.now(),
+            created=timezone.now().date(),
+        )
+        Document.objects.filter(pk=document.pk).update(
+            filename="Vertrag/2026/03/Kaufvertrag_IT_System.pdf",
+        )
+        document.refresh_from_db()
+
+        source_file = self.dirs.scratch_dir / "recovered.pdf"
+        source_file.write_bytes(b"fresh-import")
+
+        orphan_target = self.dirs.originals_dir / document.source_name
+        orphan_target.parent.mkdir(parents=True, exist_ok=True)
+        orphan_target.write_bytes(b"orphaned")
+
+        cmd = Command()
+        cmd.source = self.dirs.scratch_dir
+        cmd.no_progress_bar = True
+        cmd.task_owner = owner
+        cmd.import_tasks_by_document_id = {}
+        cmd.preexisting_original_paths = set()
+        cmd.imported_documents = 0
+        cmd.failed_documents = 0
+        cmd.manifest = [
+            {
+                "model": "documents.document",
+                "pk": document.pk,
+                EXPORTER_FILE_NAME: source_file.name,
+            },
+        ]
+
+        with mock.patch.object(Document, "save", autospec=True):
+            cmd._import_files_from_manifest()
+
+        self.assertEqual(cmd.imported_documents, 1)
+        self.assertEqual(cmd.failed_documents, 0)
+        self.assertEqual(PaperlessTask.objects.count(), 1)
+        self.assertEqual(PaperlessTask.objects.get().status, "SUCCESS")
+
+    def test_import_with_user_exists(self):
         """
         GIVEN:
             - Source directory does exist
@@ -255,7 +395,6 @@ class TestCommandImport(
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         self.assertIn(
@@ -263,7 +402,7 @@ class TestCommandImport(
             stdout.read(),
         )
 
-    def test_import_with_documents_exists(self) -> None:
+    def test_import_with_documents_exists(self):
         """
         GIVEN:
             - Source directory does exist
@@ -277,8 +416,8 @@ class TestCommandImport(
 
         Document.objects.create(
             content="Content",
-            checksum="1093cf6e32adbd16b06969df09215d42c4a3a8938cc18b39455953f08d1ff2ab",
-            archive_checksum="706124ecde3c31616992fa979caed17a726b1c9ccdba70e82a4ff796cea97ccf",
+            checksum="42995833e01aea9b3edee44bbfdd7ce1",
+            archive_checksum="62acb0bcbfbcaa62ca6ad3668e4e404b",
             title="wow1",
             filename="0000001.pdf",
             mime_type="application/pdf",
@@ -292,7 +431,6 @@ class TestCommandImport(
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         self.assertIn(
@@ -300,7 +438,7 @@ class TestCommandImport(
             str(stdout.read()),
         )
 
-    def test_import_no_metadata_or_version_file(self) -> None:
+    def test_import_no_metadata_or_version_file(self):
         """
         GIVEN:
             - A source directory with a manifest file only
@@ -314,20 +452,19 @@ class TestCommandImport(
         (self.dirs.scratch_dir / "manifest.json").touch()
 
         # We're not building a manifest, so it fails, but this test doesn't care
-        with self.assertRaises(CommandError):
+        with self.assertRaises(json.decoder.JSONDecodeError):
             call_command(
                 "document_importer",
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         stdout_str = str(stdout.read())
 
         self.assertIn("No version.json or metadata.json file located", stdout_str)
 
-    def test_import_version_file(self) -> None:
+    def test_import_version_file(self):
         """
         GIVEN:
             - A source directory with a manifest file and version file
@@ -344,13 +481,12 @@ class TestCommandImport(
         )
 
         # We're not building a manifest, so it fails, but this test doesn't care
-        with self.assertRaises(CommandError):
+        with self.assertRaises(json.decoder.JSONDecodeError):
             call_command(
                 "document_importer",
                 "--no-progress-bar",
                 str(self.dirs.scratch_dir),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         stdout_str = str(stdout.read())
@@ -358,7 +494,7 @@ class TestCommandImport(
         self.assertIn("Version mismatch:", stdout_str)
         self.assertIn("importing 2.8.1", stdout_str)
 
-    def test_import_zipped_export(self) -> None:
+    def test_import_zipped_export(self):
         """
         GIVEN:
             - A zip file with correct content (manifest.json and version.json inside)
@@ -390,7 +526,6 @@ class TestCommandImport(
                 "--no-progress-bar",
                 str(zip_path),
                 stdout=stdout,
-                skip_checks=True,
             )
         stdout.seek(0)
         stdout_str = str(stdout.read())

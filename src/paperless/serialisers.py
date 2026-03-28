@@ -16,6 +16,7 @@ from rest_framework import serializers
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 
 from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.network import validate_outbound_http_url
 from paperless.validators import reject_dangerous_svg
 from paperless_mail.serialisers import ObfuscatedPasswordField
@@ -212,6 +213,20 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    documents_backup_schedule_jobs = serializers.JSONField(
+        required=False,
+        allow_null=True,
+    )
+    documents_s3_secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+    documents_backup_s3_secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
 
     def run_validation(self, data):
         # Empty strings treated as None to avoid unexpected behavior
@@ -226,11 +241,49 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
                 data["llm_api_key"] = None
             elif len(data["llm_api_key"].replace("*", "")) == 0:
                 del data["llm_api_key"]
+        nullable_string_fields = (
+            "documents_storage_prefix",
+            "documents_s3_bucket",
+            "documents_s3_endpoint_url",
+            "documents_s3_access_key_id",
+            "documents_s3_secret_access_key",
+            "documents_s3_region_name",
+            "documents_s3_default_acl",
+            "documents_s3_custom_domain",
+            "documents_s3_url_protocol",
+            "documents_s3_addressing_style",
+            "documents_backup_prefix",
+            "documents_backup_s3_bucket",
+            "documents_backup_s3_endpoint_url",
+            "documents_backup_s3_access_key_id",
+            "documents_backup_s3_secret_access_key",
+            "documents_backup_s3_region_name",
+            "documents_backup_s3_default_acl",
+            "documents_backup_s3_custom_domain",
+            "documents_backup_s3_url_protocol",
+            "documents_backup_s3_addressing_style",
+        )
+        for field in nullable_string_fields:
+            if field in data and data[field] == "":
+                data[field] = None
         return super().run_validation(data)
 
     def update(self, instance, validated_data):
         if instance.app_logo and "app_logo" in validated_data:
             instance.app_logo.delete()
+        if (
+            "documents_s3_secret_access_key" in validated_data
+            and validated_data["documents_s3_secret_access_key"]
+            and validated_data["documents_s3_secret_access_key"].replace("*", "") == ""
+        ):
+            validated_data.pop("documents_s3_secret_access_key")
+        if (
+            "documents_backup_s3_secret_access_key" in validated_data
+            and validated_data["documents_backup_s3_secret_access_key"]
+            and validated_data["documents_backup_s3_secret_access_key"].replace("*", "")
+            == ""
+        ):
+            validated_data.pop("documents_backup_s3_secret_access_key")
         return super().update(instance, validated_data)
 
     def validate_app_logo(self, file: UploadedFile):
@@ -254,6 +307,126 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_documents_backup_schedule_jobs(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Expected a list of backup jobs.")
+
+        validated_jobs = []
+        seen_names = set()
+        for index, job in enumerate(value):
+            if not isinstance(job, dict):
+                raise serializers.ValidationError(
+                    f"Backup job at index {index} must be an object.",
+                )
+
+            name = job.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise serializers.ValidationError(
+                    f'Backup job at index {index} requires a non-empty "name".',
+                )
+            name = name.strip()
+            if name in seen_names:
+                raise serializers.ValidationError(
+                    f'Backup job name "{name}" is duplicated.',
+                )
+            seen_names.add(name)
+
+            enabled = bool(job.get("enabled", True))
+            storage = job.get("storage")
+            frequency_days = job.get("frequency_days")
+            hour = job.get("hour")
+            minute = job.get("minute")
+            retain_count = job.get("retain_count")
+            last_run = job.get("last_run")
+
+            if storage is not None and not isinstance(storage, int):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" has an invalid "storage" value.',
+                )
+            if frequency_days is not None and (
+                not isinstance(frequency_days, int) or frequency_days < 1
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "frequency_days" >= 1.',
+                )
+            if hour is not None and (
+                not isinstance(hour, int) or hour < 0 or hour > 23
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "hour" between 0 and 23.',
+                )
+            if minute is not None and (
+                not isinstance(minute, int) or minute < 0 or minute > 59
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "minute" between 0 and 59.',
+                )
+            if retain_count is not None and (
+                not isinstance(retain_count, int) or retain_count < 1
+            ):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" requires "retain_count" >= 1.',
+                )
+            if last_run is not None and not isinstance(last_run, str):
+                raise serializers.ValidationError(
+                    f'Backup job "{name}" has an invalid "last_run" value.',
+                )
+
+            validated_jobs.append(
+                {
+                    "name": name,
+                    "enabled": enabled,
+                    "storage": storage,
+                    "frequency_days": frequency_days,
+                    "hour": hour,
+                    "minute": minute,
+                    "retain_count": retain_count,
+                    "last_run": last_run,
+                },
+            )
+
+        return validated_jobs
+
     class Meta:
         model = ApplicationConfiguration
+        fields = "__all__"
+
+
+class S3StorageConfigurationSerializer(serializers.ModelSerializer):
+    secret_access_key = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    def run_validation(self, data):
+        nullable_string_fields = (
+            "prefix",
+            "endpoint_url",
+            "access_key_id",
+            "secret_access_key",
+            "region_name",
+            "default_acl",
+            "custom_domain",
+            "url_protocol",
+            "addressing_style",
+        )
+        for field in nullable_string_fields:
+            if field in data and data[field] == "":
+                data[field] = None
+        return super().run_validation(data)
+
+    def update(self, instance, validated_data):
+        if (
+            "secret_access_key" in validated_data
+            and validated_data["secret_access_key"]
+            and validated_data["secret_access_key"].replace("*", "") == ""
+        ):
+            validated_data.pop("secret_access_key")
+        return super().update(instance, validated_data)
+
+    class Meta:
+        model = S3StorageConfiguration
         fields = "__all__"

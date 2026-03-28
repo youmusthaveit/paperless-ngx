@@ -1,5 +1,7 @@
 from collections import OrderedDict
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from allauth.mfa import signals
 from allauth.mfa.adapter import get_adapter as get_mfa_adapter
@@ -9,9 +11,13 @@ from allauth.mfa.recovery_codes.internal.flows import auto_generate_recovery_cod
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.models import SocialAccount
+from celery import states
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
 from django.db.models.functions import Lower
 from django.http import FileResponse
 from django.http import HttpResponseBadRequest
@@ -36,15 +42,27 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from documents.index import DelayedQuery
+from documents.models import PaperlessTask
 from documents.permissions import PaperlessObjectPermissions
+from documents.storage import get_s3_configuration_storage
+from documents.storage import test_document_backup_storage_connection
+from documents.storage import test_document_storage_connection
+from documents.storage import test_s3_connection
+from documents.tasks import AUTOMATIC_S3_TRANSFER_LOCATION
+from documents.tasks import MANUAL_S3_TRANSFER_LOCATION
+from documents.tasks import build_manual_s3_export_filename
+from documents.tasks import export_documents_to_s3_storage
+from documents.tasks import import_documents_from_s3_storage
 from documents.tasks import llmindex_index
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.serialisers import ApplicationConfigurationSerializer
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import PaperlessAuthTokenSerializer
 from paperless.serialisers import ProfileSerializer
+from paperless.serialisers import S3StorageConfigurationSerializer
 from paperless.serialisers import UserSerializer
 from paperless_ai.indexing import vector_store_file_exists
 
@@ -219,6 +237,246 @@ class GroupViewSet(ModelViewSet):
     filter_backends = (DjangoFilterBackend, OrderingFilter)
     filterset_class = GroupFilterSet
     ordering_fields = ("name",)
+
+
+class S3StorageConfigurationViewSet(ModelViewSet):
+    model = S3StorageConfiguration
+
+    queryset = S3StorageConfiguration.objects.order_by(Lower("name"))
+
+    serializer_class = S3StorageConfigurationSerializer
+    permission_classes = (IsAuthenticated, DjangoModelPermissions)
+    pagination_class = None
+    ordering_fields = ("name",)
+
+    @action(detail=True, methods=["post"], url_path="test-connection")
+    def test_connection(self, request, pk=None):
+        storage = self.get_object()
+        serializer = self.get_serializer(storage, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        payload = dict(serializer.validated_data)
+        secret = payload.get("secret_access_key")
+        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
+            payload["secret_access_key"] = storage.secret_access_key
+
+        try:
+            test_s3_connection(
+                prefix=payload.get("prefix", storage.prefix),
+                s3_bucket=payload.get("bucket", storage.bucket),
+                s3_endpoint_url=payload.get("endpoint_url", storage.endpoint_url),
+                s3_access_key_id=payload.get("access_key_id", storage.access_key_id),
+                s3_secret_access_key=payload.get(
+                    "secret_access_key",
+                    storage.secret_access_key,
+                ),
+                s3_region_name=payload.get("region_name", storage.region_name),
+                s3_default_acl=payload.get("default_acl", storage.default_acl),
+                s3_custom_domain=payload.get("custom_domain", storage.custom_domain),
+                s3_url_protocol=payload.get("url_protocol", storage.url_protocol)
+                or "https:",
+                s3_addressing_style=payload.get(
+                    "addressing_style",
+                    storage.addressing_style,
+                ),
+                s3_querystring_auth=payload.get(
+                    "querystring_auth",
+                    storage.querystring_auth,
+                )
+                if payload.get("querystring_auth", storage.querystring_auth) is not None
+                else False,
+                s3_use_ssl=payload.get("use_ssl", storage.use_ssl)
+                if payload.get("use_ssl", storage.use_ssl) is not None
+                else True,
+            )
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="export")
+    def export_to_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        async_result = export_documents_to_s3_storage.delay(storage.pk)
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=async_result.id or str(uuid4()),
+            status=states.PENDING,
+            task_file_name=storage.name,
+            task_name=PaperlessTask.TaskName.EXPORT_S3_STORAGE,
+            result=None,
+            owner=request.user,
+        )
+        return Response(
+            {
+                "detail": (
+                    f'Started export to S3 storage "{storage.name}" in the background.'
+                ),
+                "task_id": async_result.id,
+            },
+            status=202,
+        )
+
+    @staticmethod
+    def _validate_export_name(export_name: object) -> str:
+        if not isinstance(export_name, str) or not export_name:
+            raise ValidationError({"export_name": "This field is required."})
+        export_path = Path(export_name)
+        if (
+            export_path.is_absolute()
+            or ".." in export_path.parts
+            or export_path.name != export_path.parts[-1]
+            or not export_name.endswith(".zip")
+        ):
+            raise ValidationError({"export_name": "Invalid export name."})
+        return export_name
+
+    @staticmethod
+    def _list_export_names(storage_backend, path: str = ""):
+        directories, filenames = storage_backend.listdir(path)
+        exports = [f"{path}/{filename}" if path else filename for filename in filenames]
+        for directory in directories:
+            nested_path = f"{path}/{directory}" if path else directory
+            exports.extend(
+                S3StorageConfigurationViewSet._list_export_names(
+                    storage_backend,
+                    nested_path,
+                ),
+            )
+        return exports
+
+    @staticmethod
+    def _get_export_storage_candidates(storage):
+        return [
+            (
+                MANUAL_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage,
+                    location=MANUAL_S3_TRANSFER_LOCATION,
+                ),
+            ),
+            (
+                AUTOMATIC_S3_TRANSFER_LOCATION,
+                get_s3_configuration_storage(
+                    storage,
+                    location=AUTOMATIC_S3_TRANSFER_LOCATION,
+                ),
+            ),
+        ]
+
+    @classmethod
+    def _get_storage_backend_for_export(cls, storage, export_name: str):
+        for _, storage_backend in cls._get_export_storage_candidates(storage):
+            if storage_backend.exists(export_name):
+                return storage_backend
+        raise ValidationError({"export_name": "Export not found."})
+
+    @action(detail=True, methods=["get"], url_path="exports")
+    def list_exports(self, request, pk=None):
+        storage = self.get_object()
+        try:
+            exports = []
+            for _, storage_backend in self._get_export_storage_candidates(storage):
+                for filename in self._list_export_names(storage_backend):
+                    if not filename.endswith(".zip"):
+                        continue
+                    exports.append(
+                        {
+                            "name": filename,
+                            "size": storage_backend.size(filename),
+                            "modified": storage_backend.get_modified_time(filename),
+                        },
+                    )
+            exports.sort(key=lambda export: export["name"], reverse=True)
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to list exports for "{storage.name}": {exc}'},
+            ) from exc
+
+        return Response(exports)
+
+    @action(detail=True, methods=["post"], url_path="download-export")
+    def download_export_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = self._validate_export_name(request.data.get("export_name"))
+        try:
+            storage_backend = self._get_storage_backend_for_export(storage, export_name)
+            return FileResponse(
+                storage_backend.open(export_name, "rb"),
+                as_attachment=True,
+                filename=Path(export_name).name,
+                content_type="application/zip",
+            )
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to download export "{export_name}": {exc}'},
+            ) from exc
+
+    @action(detail=True, methods=["post"], url_path="delete-export")
+    def delete_export_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = self._validate_export_name(request.data.get("export_name"))
+        try:
+            storage_backend = self._get_storage_backend_for_export(storage, export_name)
+            storage_backend.delete(export_name)
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f'Unable to delete export "{export_name}": {exc}'},
+            ) from exc
+
+        return Response(
+            {"detail": f'Successfully deleted export "{export_name}".'},
+        )
+
+    @action(detail=True, methods=["post"], url_path="import")
+    def import_from_storage(self, request, pk=None):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        storage = self.get_object()
+        export_name = self._validate_export_name(request.data.get("export_name"))
+
+        async_result = import_documents_from_s3_storage.delay(
+            storage.pk,
+            export_name,
+            request.user.pk,
+        )
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=async_result.id or str(uuid4()),
+            status=states.PENDING,
+            task_file_name=storage.name,
+            task_name=PaperlessTask.TaskName.IMPORT_S3_STORAGE,
+            result=None,
+            owner=request.user,
+        )
+        return Response(
+            {
+                "detail": (
+                    f'Started import from S3 storage "{storage.name}" '
+                    f'using "{export_name}" in the background.'
+                ),
+                "task_id": async_result.id,
+            },
+            status=202,
+        )
 
 
 class ProfileView(GenericAPIView):
@@ -423,6 +681,112 @@ class ApplicationConfigurationViewSet(ModelViewSet):
                 scheduled=False,
                 auto=True,
             )
+
+    @staticmethod
+    def _restore_masked_secret(
+        *,
+        overrides: dict[str, object],
+        config: ApplicationConfiguration,
+        key: str,
+    ) -> None:
+        secret = overrides.get(key)
+        if isinstance(secret, str) and secret and secret.replace("*", "") == "":
+            overrides[key] = getattr(config, key)
+
+    @action(detail=True, methods=["post"], url_path="test-s3-storage")
+    def test_s3_storage(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = self.get_serializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        overrides = {
+            key: value
+            for key, value in serializer.validated_data.items()
+            if key.startswith("documents_") and not key.startswith("documents_backup_")
+        }
+
+        self._restore_masked_secret(
+            overrides=overrides,
+            config=config,
+            key="documents_s3_secret_access_key",
+        )
+
+        try:
+            test_document_storage_connection(overrides)
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="test-s3-backup-storage")
+    def test_s3_backup_storage(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = self.get_serializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        overrides = {
+            key: value
+            for key, value in serializer.validated_data.items()
+            if key.startswith("documents_backup_")
+        }
+
+        self._restore_masked_secret(
+            overrides=overrides,
+            config=config,
+            key="documents_backup_s3_secret_access_key",
+        )
+
+        try:
+            test_document_backup_storage_connection(overrides)
+        except (ImproperlyConfigured, OSError, ValueError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        except Exception as exc:
+            raise ValidationError(
+                {"detail": f"S3 backup storage test failed: {exc}"},
+            ) from exc
+
+        return Response({"detail": "S3 backup storage test succeeded."})
+
+    @action(detail=True, methods=["post"], url_path="download-export")
+    def download_export(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        export_filename = build_manual_s3_export_filename()
+        settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+        temp_dir = TemporaryDirectory(
+            dir=settings.SCRATCH_DIR,
+            prefix="paperless-download-export-",
+        )
+        export_dir = Path(temp_dir.name)
+
+        call_command(
+            "document_exporter",
+            export_dir,
+            zip=True,
+            zip_name=export_filename.removesuffix(".zip"),
+            use_filename_format=True,
+            use_folder_prefix=True,
+            no_progress_bar=True,
+        )
+
+        export_path = export_dir / export_filename
+        if not export_path.exists():
+            temp_dir.cleanup()
+            raise ValidationError({"detail": "Export file was not created."})
+
+        response = FileResponse(
+            export_path.open("rb"),
+            as_attachment=True,
+            filename=export_filename,
+            content_type="application/zip",
+        )
+        response._resource_closers.append(temp_dir.cleanup)
+        return response
 
 
 @extend_schema_view(

@@ -2,8 +2,12 @@ import dataclasses
 import json
 
 from django.conf import settings
+from django.db import OperationalError
+from django.db import ProgrammingError
 
 from paperless.models import ApplicationConfiguration
+from paperless.models import DocumentStorageTypeChoices
+from paperless.models import S3StorageConfiguration
 
 
 @dataclasses.dataclass
@@ -14,12 +18,15 @@ class BaseConfig:
 
     @staticmethod
     def _get_config_instance() -> ApplicationConfiguration:
-        app_config = ApplicationConfiguration.objects.all().first()
-        # Workaround for a test where the migration hasn't run to create the single model
-        if app_config is None:
-            ApplicationConfiguration.objects.create()
+        try:
             app_config = ApplicationConfiguration.objects.all().first()
-        return app_config
+            # Workaround for a test where the migration hasn't run to create the single model
+            if app_config is None:
+                ApplicationConfiguration.objects.create()
+                app_config = ApplicationConfiguration.objects.all().first()
+            return app_config
+        except (OperationalError, ProgrammingError):
+            return ApplicationConfiguration()
 
 
 @dataclasses.dataclass
@@ -209,3 +216,327 @@ class AIConfig(BaseConfig):
     @property
     def llm_index_enabled(self) -> bool:
         return bool(self.ai_enabled and self.llm_embedding_backend)
+
+
+def _resolve_s3_storage_override(
+    overrides: dict[str, object],
+    key: str,
+    current_value: S3StorageConfiguration | None,
+) -> S3StorageConfiguration | None:
+    value = overrides.get(key, current_value)
+    if isinstance(value, S3StorageConfiguration) or value is None:
+        return value
+    if isinstance(value, int):
+        return S3StorageConfiguration.objects.filter(pk=value).first()
+    return current_value
+
+
+def _storage_attr(
+    selected_storage: S3StorageConfiguration | None,
+    attr_name: str,
+):
+    return getattr(selected_storage, attr_name) if selected_storage else None
+
+
+@dataclasses.dataclass
+class DocumentStorageConfig(BaseConfig):
+    overrides: dict[str, object] | None = None
+    app_config: ApplicationConfiguration | None = None
+    storage_type: str = dataclasses.field(init=False)
+    prefix: str = dataclasses.field(init=False)
+    s3_bucket: str | None = dataclasses.field(init=False)
+    s3_endpoint_url: str | None = dataclasses.field(init=False)
+    s3_access_key_id: str | None = dataclasses.field(init=False)
+    s3_secret_access_key: str | None = dataclasses.field(init=False)
+    s3_region_name: str | None = dataclasses.field(init=False)
+    s3_default_acl: str | None = dataclasses.field(init=False)
+    s3_custom_domain: str | None = dataclasses.field(init=False)
+    s3_url_protocol: str = dataclasses.field(init=False)
+    s3_addressing_style: str | None = dataclasses.field(init=False)
+    s3_querystring_auth: bool = dataclasses.field(init=False)
+    s3_use_ssl: bool = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        app_config = self.app_config or self._get_config_instance()
+        overrides = self.overrides or {}
+
+        def get_value(key: str, current_value):
+            return overrides.get(key, current_value)
+
+        self.storage_type = (
+            get_value("documents_storage_type", app_config.documents_storage_type)
+            or settings.DOCUMENTS_STORAGE_TYPE
+            or DocumentStorageTypeChoices.LOCAL
+        )
+        selected_storage = _resolve_s3_storage_override(
+            overrides,
+            "documents_s3_storage",
+            app_config.documents_s3_storage,
+        )
+        self.prefix = (
+            get_value(
+                "documents_storage_prefix",
+                _storage_attr(selected_storage, "prefix")
+                or app_config.documents_storage_prefix,
+            )
+            or settings.DOCUMENTS_STORAGE_PREFIX
+            or "documents"
+        ).strip("/")
+        self.s3_bucket = (
+            get_value(
+                "documents_s3_bucket",
+                _storage_attr(selected_storage, "bucket")
+                or app_config.documents_s3_bucket,
+            )
+            or settings.DOCUMENTS_S3_BUCKET
+        )
+        self.s3_endpoint_url = (
+            get_value(
+                "documents_s3_endpoint_url",
+                _storage_attr(selected_storage, "endpoint_url")
+                or app_config.documents_s3_endpoint_url,
+            )
+            or settings.DOCUMENTS_S3_ENDPOINT_URL
+        )
+        self.s3_access_key_id = (
+            get_value(
+                "documents_s3_access_key_id",
+                _storage_attr(selected_storage, "access_key_id")
+                or app_config.documents_s3_access_key_id,
+            )
+            or settings.DOCUMENTS_S3_ACCESS_KEY_ID
+        )
+        self.s3_secret_access_key = (
+            get_value(
+                "documents_s3_secret_access_key",
+                _storage_attr(selected_storage, "secret_access_key")
+                or app_config.documents_s3_secret_access_key,
+            )
+            or settings.DOCUMENTS_S3_SECRET_ACCESS_KEY
+        )
+        self.s3_region_name = (
+            get_value(
+                "documents_s3_region_name",
+                _storage_attr(selected_storage, "region_name")
+                or app_config.documents_s3_region_name,
+            )
+            or settings.DOCUMENTS_S3_REGION_NAME
+        )
+        self.s3_default_acl = (
+            get_value(
+                "documents_s3_default_acl",
+                _storage_attr(selected_storage, "default_acl")
+                or app_config.documents_s3_default_acl,
+            )
+            or settings.DOCUMENTS_S3_DEFAULT_ACL
+        )
+        self.s3_custom_domain = (
+            get_value(
+                "documents_s3_custom_domain",
+                _storage_attr(selected_storage, "custom_domain")
+                or app_config.documents_s3_custom_domain,
+            )
+            or settings.DOCUMENTS_S3_CUSTOM_DOMAIN
+        )
+        self.s3_url_protocol = (
+            get_value(
+                "documents_s3_url_protocol",
+                _storage_attr(selected_storage, "url_protocol")
+                or app_config.documents_s3_url_protocol,
+            )
+            or settings.DOCUMENTS_S3_URL_PROTOCOL
+            or "https:"
+        )
+        self.s3_addressing_style = (
+            get_value(
+                "documents_s3_addressing_style",
+                _storage_attr(selected_storage, "addressing_style")
+                or app_config.documents_s3_addressing_style,
+            )
+            or settings.DOCUMENTS_S3_ADDRESSING_STYLE
+        )
+        current_querystring_auth = (
+            _storage_attr(selected_storage, "querystring_auth")
+            if selected_storage is not None
+            else app_config.documents_s3_querystring_auth
+        )
+        self.s3_querystring_auth = (
+            get_value(
+                "documents_s3_querystring_auth",
+                current_querystring_auth,
+            )
+            if get_value(
+                "documents_s3_querystring_auth",
+                current_querystring_auth,
+            )
+            is not None
+            else settings.DOCUMENTS_S3_QUERYSTRING_AUTH
+        )
+        current_use_ssl = (
+            _storage_attr(selected_storage, "use_ssl")
+            if selected_storage is not None
+            else app_config.documents_s3_use_ssl
+        )
+        self.s3_use_ssl = (
+            get_value(
+                "documents_s3_use_ssl",
+                current_use_ssl,
+            )
+            if get_value(
+                "documents_s3_use_ssl",
+                current_use_ssl,
+            )
+            is not None
+            else settings.DOCUMENTS_S3_USE_SSL
+        )
+
+
+@dataclasses.dataclass
+class DocumentBackupConfig(BaseConfig):
+    overrides: dict[str, object] | None = None
+    app_config: ApplicationConfiguration | None = None
+    prefix: str = dataclasses.field(init=False)
+    s3_bucket: str | None = dataclasses.field(init=False)
+    s3_endpoint_url: str | None = dataclasses.field(init=False)
+    s3_access_key_id: str | None = dataclasses.field(init=False)
+    s3_secret_access_key: str | None = dataclasses.field(init=False)
+    s3_region_name: str | None = dataclasses.field(init=False)
+    s3_default_acl: str | None = dataclasses.field(init=False)
+    s3_custom_domain: str | None = dataclasses.field(init=False)
+    s3_url_protocol: str = dataclasses.field(init=False)
+    s3_addressing_style: str | None = dataclasses.field(init=False)
+    s3_querystring_auth: bool = dataclasses.field(init=False)
+    s3_use_ssl: bool = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        app_config = self.app_config or self._get_config_instance()
+        overrides = self.overrides or {}
+
+        def get_value(key: str, current_value):
+            return overrides.get(key, current_value)
+
+        selected_storage = _resolve_s3_storage_override(
+            overrides,
+            "documents_backup_s3_storage",
+            app_config.documents_backup_s3_storage,
+        )
+        self.prefix = (
+            get_value(
+                "documents_backup_prefix",
+                _storage_attr(selected_storage, "prefix")
+                or app_config.documents_backup_prefix,
+            )
+            or settings.DOCUMENTS_BACKUP_PREFIX
+            or "documents-backup"
+        ).strip("/")
+        self.s3_bucket = (
+            get_value(
+                "documents_backup_s3_bucket",
+                _storage_attr(selected_storage, "bucket")
+                or app_config.documents_backup_s3_bucket,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_BUCKET
+        )
+        self.s3_endpoint_url = (
+            get_value(
+                "documents_backup_s3_endpoint_url",
+                _storage_attr(selected_storage, "endpoint_url")
+                or app_config.documents_backup_s3_endpoint_url,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_ENDPOINT_URL
+        )
+        self.s3_access_key_id = (
+            get_value(
+                "documents_backup_s3_access_key_id",
+                _storage_attr(selected_storage, "access_key_id")
+                or app_config.documents_backup_s3_access_key_id,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_ACCESS_KEY_ID
+        )
+        self.s3_secret_access_key = (
+            get_value(
+                "documents_backup_s3_secret_access_key",
+                _storage_attr(selected_storage, "secret_access_key")
+                or app_config.documents_backup_s3_secret_access_key,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_SECRET_ACCESS_KEY
+        )
+        self.s3_region_name = (
+            get_value(
+                "documents_backup_s3_region_name",
+                _storage_attr(selected_storage, "region_name")
+                or app_config.documents_backup_s3_region_name,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_REGION_NAME
+        )
+        self.s3_default_acl = (
+            get_value(
+                "documents_backup_s3_default_acl",
+                _storage_attr(selected_storage, "default_acl")
+                or app_config.documents_backup_s3_default_acl,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_DEFAULT_ACL
+        )
+        self.s3_custom_domain = (
+            get_value(
+                "documents_backup_s3_custom_domain",
+                _storage_attr(selected_storage, "custom_domain")
+                or app_config.documents_backup_s3_custom_domain,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_CUSTOM_DOMAIN
+        )
+        self.s3_url_protocol = (
+            get_value(
+                "documents_backup_s3_url_protocol",
+                _storage_attr(selected_storage, "url_protocol")
+                or app_config.documents_backup_s3_url_protocol,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_URL_PROTOCOL
+            or "https:"
+        )
+        self.s3_addressing_style = (
+            get_value(
+                "documents_backup_s3_addressing_style",
+                _storage_attr(selected_storage, "addressing_style")
+                or app_config.documents_backup_s3_addressing_style,
+            )
+            or settings.DOCUMENTS_BACKUP_S3_ADDRESSING_STYLE
+        )
+        current_querystring_auth = (
+            _storage_attr(selected_storage, "querystring_auth")
+            if selected_storage is not None
+            else app_config.documents_backup_s3_querystring_auth
+        )
+        self.s3_querystring_auth = (
+            get_value(
+                "documents_backup_s3_querystring_auth",
+                current_querystring_auth,
+            )
+            if get_value(
+                "documents_backup_s3_querystring_auth",
+                current_querystring_auth,
+            )
+            is not None
+            else settings.DOCUMENTS_BACKUP_S3_QUERYSTRING_AUTH
+        )
+        current_use_ssl = (
+            _storage_attr(selected_storage, "use_ssl")
+            if selected_storage is not None
+            else app_config.documents_backup_s3_use_ssl
+        )
+        self.s3_use_ssl = (
+            get_value(
+                "documents_backup_s3_use_ssl",
+                current_use_ssl,
+            )
+            if get_value(
+                "documents_backup_s3_use_ssl",
+                current_use_ssl,
+            )
+            is not None
+            else settings.DOCUMENTS_BACKUP_S3_USE_SSL
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.s3_bucket)

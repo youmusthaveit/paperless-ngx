@@ -246,7 +246,22 @@ class TestTasks(DirectoriesMixin, APITestCase):
         self.assertEqual(returned_data["result"], "Success. New document id 1 created")
         self.assertEqual(returned_data["related_document"], "1")
 
-    def test_task_result_with_error(self) -> None:
+    def test_import_task_result_includes_related_doc(self):
+        PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="2026/03/Vertrag/Werkvertrag.pdf",
+            task_name=PaperlessTask.TaskName.IMPORT_FILE,
+            status=celery.states.SUCCESS,
+            result='Imported "2026/03/Vertrag/Werkvertrag.pdf". New document id 5 created.',
+        )
+
+        response = self.client.get(self.ENDPOINT)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["related_document"], "5")
+
+    def test_task_result_with_error(self):
         """
         GIVEN:
             - A celery task completed with an exception
