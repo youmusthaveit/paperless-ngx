@@ -1,6 +1,5 @@
 import datetime
 import os
-import shutil
 import tempfile
 from enum import StrEnum
 from pathlib import Path
@@ -14,13 +13,13 @@ from django.db import transaction
 from django.db.models import Max
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from filelock import FileLock
 from rest_framework.reverse import reverse
 
 from documents.classifier import load_classifier
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
-from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_filename
 from documents.file_handling import generate_unique_filename
 from documents.loggers import LoggingMixin
@@ -45,14 +44,16 @@ from documents.signals import document_consumption_finished
 from documents.signals import document_consumption_started
 from documents.signals import document_updated
 from documents.signals.handlers import run_workflows
+from documents.storage import document_write_from_path
 from documents.templating.workflows import parse_w_workflow_placeholders
 from documents.utils import compute_checksum
-from documents.utils import copy_basic_file_stats
 from documents.utils import copy_file_with_basic_stats
 from documents.utils import run_subprocess
 from paperless.parsers import ParserContext
 from paperless.parsers import ParserProtocol
 from paperless.parsers.registry import get_parser_registry
+from paperless.parsers.xrechnung import XRECHNUNG_SOURCE_FIELDS
+from paperless.parsers.xrechnung import get_xrechnung_source_value
 
 LOGGING_NAME: Final[str] = "paperless.consumer"
 
@@ -439,6 +440,7 @@ class ConsumerPlugin(
                     self.log.debug(f"Parsing {self.filename}...")
 
                     document_parser.parse(self.working_copy, mime_type)
+                    self._apply_xrechnung_overrides(document_parser)
 
                     self.log.debug(f"Generating thumbnail for {self.filename}...")
                     self._send_progress(
@@ -594,18 +596,18 @@ class ConsumerPlugin(
                                     use_format=False,
                                 )
                             document.filename = generated_filename
-                            create_source_path_directory(document.source_path)
-
-                            self._write(
+                            document_write_from_path(
+                                "originals",
+                                document.source_name,
                                 self.unmodified_original
                                 if self.unmodified_original is not None
                                 else self.working_copy,
-                                document.source_path,
                             )
 
-                            self._write(
+                            document_write_from_path(
+                                "thumbnails",
+                                document.thumbnail_name,
                                 thumbnail,
-                                document.thumbnail_path,
                             )
 
                             if archive_path and Path(archive_path).is_file():
@@ -626,14 +628,14 @@ class ConsumerPlugin(
                                         use_format=False,
                                     )
                                 document.archive_filename = generated_archive_filename
-                                create_source_path_directory(document.archive_path)
-                                self._write(
+                                document_write_from_path(
+                                    "archive",
+                                    document.archive_name,
                                     archive_path,
-                                    document.archive_path,
                                 )
 
                                 document.archive_checksum = compute_checksum(
-                                    document.archive_path,
+                                    archive_path,
                                 )
 
                         # Don't save with the lock active. Saving will cause the file
@@ -695,6 +697,169 @@ class ConsumerPlugin(
         document.refresh_from_db()
 
         return f"Success. New document id {document.pk} created"
+
+    def _apply_xrechnung_overrides(self, document_parser: ParserProtocol) -> None:
+        get_invoice = getattr(document_parser, "get_invoice", None)
+        if not callable(get_invoice):
+            return
+
+        invoice = get_invoice()
+        if invoice is None:
+            return
+
+        document_type = (
+            DocumentType.objects.filter(enable_xrechnung_import=True)
+            .select_related("owner")
+            .first()
+        )
+        if document_type is None:
+            return
+
+        if self.metadata.document_type_id is None:
+            self.metadata.document_type_id = document_type.pk
+
+        correspondent_source = document_type.xrechnung_correspondent_field
+        if (
+            self.metadata.correspondent_id is None
+            and correspondent_source in XRECHNUNG_SOURCE_FIELDS
+        ):
+            correspondent_value = get_xrechnung_source_value(
+                invoice,
+                correspondent_source,
+            )
+            correspondent = self._resolve_xrechnung_correspondent(
+                correspondent_value,
+                document_type.owner,
+            )
+            if correspondent is not None:
+                self.metadata.correspondent_id = correspondent.pk
+
+        if not document_type.xrechnung_custom_field_mappings:
+            return
+
+        if self.metadata.custom_fields is None:
+            self.metadata.custom_fields = {}
+
+        mappings_by_custom_field = {
+            mapping["custom_field"]: mapping["source"]
+            for mapping in document_type.xrechnung_custom_field_mappings
+            if isinstance(mapping, dict)
+            and isinstance(mapping.get("custom_field"), int)
+            and mapping.get("source") in XRECHNUNG_SOURCE_FIELDS
+        }
+
+        for field in CustomField.objects.filter(pk__in=mappings_by_custom_field.keys()):
+            raw_value = get_xrechnung_source_value(
+                invoice,
+                mappings_by_custom_field[field.pk],
+            )
+            coerced_value = self._coerce_xrechnung_custom_field_value(
+                field,
+                raw_value,
+                invoice.currency,
+            )
+            if (
+                coerced_value is not None
+                and field.pk not in self.metadata.custom_fields
+            ):
+                self.metadata.custom_fields[field.pk] = coerced_value
+
+    def _resolve_xrechnung_correspondent(
+        self,
+        value: object,
+        owner: User | None,
+    ) -> Correspondent | None:
+        if not isinstance(value, str):
+            return None
+
+        normalized_value = value.strip()
+        if not normalized_value:
+            return None
+
+        if owner is not None:
+            owned_match = Correspondent.objects.filter(
+                owner=owner,
+                name__iexact=normalized_value,
+            ).first()
+            if owned_match is not None:
+                return owned_match
+
+        global_match = Correspondent.objects.filter(
+            owner__isnull=True,
+            name__iexact=normalized_value,
+        ).first()
+        if global_match is not None:
+            return global_match
+
+        return Correspondent.objects.create(
+            name=normalized_value,
+            owner=owner,
+        )
+
+    def _coerce_xrechnung_custom_field_value(
+        self,
+        field: CustomField,
+        raw_value: object,
+        currency: str | None,
+    ) -> object | None:
+        if raw_value is None:
+            return None
+
+        if field.data_type in (
+            CustomField.FieldDataType.STRING,
+            CustomField.FieldDataType.URL,
+            CustomField.FieldDataType.LONG_TEXT,
+        ):
+            return str(raw_value)
+
+        if field.data_type == CustomField.FieldDataType.DATE:
+            if isinstance(raw_value, datetime.date):
+                return raw_value
+            return parse_date(str(raw_value))
+
+        if field.data_type == CustomField.FieldDataType.INT:
+            try:
+                return int(str(raw_value))
+            except (TypeError, ValueError):
+                return None
+
+        if field.data_type == CustomField.FieldDataType.FLOAT:
+            try:
+                return float(str(raw_value))
+            except (TypeError, ValueError):
+                return None
+
+        if field.data_type == CustomField.FieldDataType.MONETARY:
+            value = str(raw_value).strip()
+            if not value:
+                return None
+            if currency:
+                return f"{currency} {value}"
+            return value
+
+        if field.data_type == CustomField.FieldDataType.BOOL:
+            if isinstance(raw_value, bool):
+                return raw_value
+            normalized = str(raw_value).strip().lower()
+            if normalized in {"1", "true", "yes", "y"}:
+                return True
+            if normalized in {"0", "false", "no", "n"}:
+                return False
+            return None
+
+        if field.data_type == CustomField.FieldDataType.SELECT:
+            value = str(raw_value).strip()
+            if not value or not field.extra_data:
+                return None
+            for option in field.extra_data.get("select_options", []):
+                if (
+                    option.get("id") == value
+                    or option.get("label", "").lower() == value.lower()
+                ):
+                    return option.get("id")
+            return None
+
+        return None
 
     def _parse_title_placeholders(self, title: str) -> str:
         local_added = timezone.localtime(timezone.now())
@@ -849,19 +1014,6 @@ class ConsumerPlugin(
                     value_field_name: self.metadata.custom_fields.get(field.id, None),
                 }
                 CustomFieldInstance.objects.create(**args)  # adds to document
-
-    def _write(self, source, target) -> None:
-        with (
-            Path(source).open("rb") as read_file,
-            Path(target).open("wb") as write_file,
-        ):
-            shutil.copyfileobj(read_file, write_file)
-
-        # Attempt to copy file's original stats, but it's ok if we can't
-        try:
-            copy_basic_file_stats(source, target)
-        except Exception:  # pragma: no cover
-            pass
 
 
 class ConsumerPreflightPlugin(

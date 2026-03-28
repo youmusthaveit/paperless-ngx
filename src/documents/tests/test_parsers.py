@@ -1,14 +1,18 @@
+from pathlib import Path
+
 from django.test import TestCase
 from django.test import override_settings
 
 from documents.parsers import get_default_file_extension
 from documents.parsers import get_supported_file_extensions
 from documents.parsers import is_file_ext_supported
+from documents.parsers import is_mime_type_supported
 from paperless.parsers.registry import get_parser_registry
 from paperless.parsers.registry import reset_parser_registry
 from paperless.parsers.tesseract import RasterisedDocumentParser
 from paperless.parsers.text import TextDocumentParser
 from paperless.parsers.tika import TikaDocumentParser
+from paperless.parsers.xrechnung import XRechnungDocumentParser
 
 
 class TestParserAvailability(TestCase):
@@ -99,6 +103,25 @@ class TestParserAvailability(TestCase):
 
     def test_no_parser_for_mime(self) -> None:
         self.assertIsNone(get_parser_registry().get_parser_for_file("text/sdgsdf", ""))
+
+    def test_xrechnung_parser(self) -> None:
+        sample_file = (
+            Path(__file__).resolve().parents[3]
+            / "resources"
+            / "beispiel-xrechnung-cii.xml"
+        )
+        self.assertIn(".xml", get_supported_file_extensions())
+        self.assertEqual(get_default_file_extension("application/xml"), ".xml")
+        self.assertIsInstance(
+            get_parser_registry().get_parser_for_file(
+                "application/xml",
+                sample_file.name,
+                sample_file,
+            )(),
+            XRechnungDocumentParser,
+        )
+        self.assertTrue(is_mime_type_supported("application/xml"))
+        self.assertTrue(is_mime_type_supported("text/xml"))
 
     def test_default_extension(self) -> None:
         # Test no parser declared still returns a an extension

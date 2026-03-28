@@ -157,6 +157,30 @@ class DocumentType(MatchingModel):
         related_name="document_types",
         verbose_name=_("custom fields"),
     )
+    enable_xrechnung_import = models.BooleanField(
+        _("enable XRechnung import"),
+        default=False,
+        help_text=_(
+            "Automatically assign this document type to detected XRechnung XML imports.",
+        ),
+    )
+    xrechnung_correspondent_field = models.CharField(
+        _("XRechnung correspondent field"),
+        max_length=64,
+        blank=True,
+        null=True,
+        help_text=_(
+            "Optional XRechnung field used to populate the correspondent.",
+        ),
+    )
+    xrechnung_custom_field_mappings = models.JSONField(
+        _("XRechnung custom field mappings"),
+        default=list,
+        blank=True,
+        help_text=_(
+            "Maps XRechnung fields to custom fields during import.",
+        ),
+    )
 
     class Meta(MatchingModel.Meta):
         verbose_name = _("document type")

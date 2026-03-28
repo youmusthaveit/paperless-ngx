@@ -177,6 +177,49 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         results = response.data["results"]
         self.assertEqual(len(results[0]), 0)
 
+    def test_patch_document_type_transfers_xrechnung_fields(self) -> None:
+        custom_field = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(
+            name="XRechnung",
+            xrechnung_correspondent_field="seller_name",
+            xrechnung_custom_field_mappings=[
+                {
+                    "custom_field": custom_field.pk,
+                    "source": "invoice_number",
+                },
+            ],
+        )
+        sample_file = (
+            Path(__file__).resolve().parents[3]
+            / "resources"
+            / "beispiel-xrechnung-cii.xml"
+        )
+        doc = Document.objects.create(
+            title="xrechnung",
+            content="content",
+            checksum="123",
+            mime_type="application/xml",
+        )
+        doc.source_write_bytes(sample_file.read_bytes())
+
+        response = self.client.patch(
+            f"/api/documents/{doc.pk}/",
+            {
+                "document_type": document_type.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+
+        self.assertEqual(doc.document_type, document_type)
+        self.assertEqual(doc.correspondent.name, "TÜV Rheinland GmbH")
+        self.assertEqual(doc.custom_fields.get(field=custom_field).value, "1122334455")
+
     def test_document_fields_respects_created(self) -> None:
         Document.objects.create(
             title="legacy",

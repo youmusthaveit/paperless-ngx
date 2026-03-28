@@ -7,6 +7,7 @@ so it is easy to see which files belong to which test module.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,11 +18,11 @@ from paperless.parsers.remote import RemoteDocumentParser
 from paperless.parsers.tesseract import RasterisedDocumentParser
 from paperless.parsers.text import TextDocumentParser
 from paperless.parsers.tika import TikaDocumentParser
+from paperless.parsers.xrechnung import XRechnungDocumentParser
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Generator
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     from pytest_django.fixtures import SettingsWrapper
@@ -227,6 +228,32 @@ def tika_parser() -> Generator[TikaDocumentParser, None, None]:
         A ready-to-use parser instance.
     """
     with TikaDocumentParser() as parser:
+        yield parser
+
+
+# ------------------------------------------------------------------
+# XRechnung parser sample files
+# ------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def sample_xrechnung_cii_file() -> Path:
+    """Path to the checked-in XRechnung CII example document."""
+
+    from pathlib import Path as LocalPath
+
+    return (
+        LocalPath(__file__).resolve().parents[4]
+        / "resources"
+        / "beispiel-xrechnung-cii.xml"
+    ).resolve()
+
+
+@pytest.fixture()
+def xrechnung_parser() -> Generator[XRechnungDocumentParser, None, None]:
+    """Yield an XRechnungDocumentParser and clean up after the test."""
+
+    with XRechnungDocumentParser() as parser:
         yield parser
 
 

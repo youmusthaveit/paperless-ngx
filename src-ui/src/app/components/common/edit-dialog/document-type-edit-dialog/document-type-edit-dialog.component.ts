@@ -1,5 +1,6 @@
-import { Component, inject } from '@angular/core'
+import { Component, OnInit, inject } from '@angular/core'
 import {
+  FormArray,
   FormControl,
   FormGroup,
   FormsModule,
@@ -19,6 +20,28 @@ import { PermissionsFormComponent } from '../../input/permissions/permissions-fo
 import { SelectComponent } from '../../input/select/select.component'
 import { TextComponent } from '../../input/text/text.component'
 
+const XRECHNUNG_FIELD_OPTIONS = [
+  { id: 'profile', name: $localize`Profile` },
+  { id: 'invoice_number', name: $localize`Invoice number` },
+  { id: 'invoice_type_code', name: $localize`Invoice type code` },
+  { id: 'issue_date', name: $localize`Issue date` },
+  { id: 'due_amount', name: $localize`Due amount` },
+  { id: 'grand_total', name: $localize`Grand total` },
+  { id: 'tax_total', name: $localize`Tax total` },
+  { id: 'currency', name: $localize`Currency` },
+  { id: 'buyer_reference', name: $localize`Buyer reference` },
+  { id: 'payment_reference', name: $localize`Payment reference` },
+  { id: 'payment_terms', name: $localize`Payment terms` },
+  { id: 'seller_name', name: $localize`Seller name` },
+  { id: 'seller_identifier', name: $localize`Seller identifier` },
+  { id: 'seller_tax_identifier', name: $localize`Seller tax identifier` },
+  { id: 'seller_email', name: $localize`Seller email` },
+  { id: 'buyer_name', name: $localize`Buyer name` },
+  { id: 'buyer_identifier', name: $localize`Buyer identifier` },
+  { id: 'buyer_tax_identifier', name: $localize`Buyer tax identifier` },
+  { id: 'buyer_email', name: $localize`Buyer email` },
+]
+
 @Component({
   selector: 'pngx-document-type-edit-dialog',
   templateUrl: './document-type-edit-dialog.component.html',
@@ -33,8 +56,12 @@ import { TextComponent } from '../../input/text/text.component'
     ReactiveFormsModule,
   ],
 })
-export class DocumentTypeEditDialogComponent extends EditDialogComponent<DocumentType> {
+export class DocumentTypeEditDialogComponent
+  extends EditDialogComponent<DocumentType>
+  implements OnInit
+{
   customFields: CustomField[] = []
+  xrechnungFieldOptions = XRECHNUNG_FIELD_OPTIONS
 
   constructor() {
     super()
@@ -46,12 +73,23 @@ export class DocumentTypeEditDialogComponent extends EditDialogComponent<Documen
       .subscribe((result) => (this.customFields = result.results))
   }
 
+  ngOnInit(): void {
+    super.ngOnInit()
+    this.setXRechnungMappings(
+      this.object?.xrechnung_custom_field_mappings ?? []
+    )
+  }
+
   getCreateTitle() {
     return $localize`Create new document type`
   }
 
   getEditTitle() {
     return $localize`Edit document type`
+  }
+
+  get xrechnungMappings(): FormArray {
+    return this.objectForm.get('xrechnung_custom_field_mappings') as FormArray
   }
 
   getForm(): FormGroup {
@@ -61,7 +99,37 @@ export class DocumentTypeEditDialogComponent extends EditDialogComponent<Documen
       match: new FormControl(''),
       is_insensitive: new FormControl(true),
       custom_fields: new FormControl([]),
+      enable_xrechnung_import: new FormControl(false),
+      xrechnung_correspondent_field: new FormControl(null),
+      xrechnung_custom_field_mappings: new FormArray([]),
       permissions_form: new FormControl(null),
     })
+  }
+
+  addXRechnungMapping() {
+    this.xrechnungMappings.push(
+      new FormGroup({
+        custom_field: new FormControl(null),
+        source: new FormControl(null),
+      })
+    )
+  }
+
+  removeXRechnungMapping(index: number) {
+    this.xrechnungMappings.removeAt(index)
+  }
+
+  private setXRechnungMappings(
+    mappings: DocumentType['xrechnung_custom_field_mappings']
+  ) {
+    this.xrechnungMappings.clear()
+    mappings?.forEach((mapping) =>
+      this.xrechnungMappings.push(
+        new FormGroup({
+          custom_field: new FormControl(mapping.custom_field ?? null),
+          source: new FormControl(mapping.source ?? null),
+        })
+      )
+    )
   }
 }
