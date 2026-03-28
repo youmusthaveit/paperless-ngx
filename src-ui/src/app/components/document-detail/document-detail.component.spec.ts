@@ -950,8 +950,8 @@ describe('DocumentDetailComponent', () => {
 
   it('should support reprocess, confirm and close modal after started', () => {
     initNormally()
-    const bulkEditSpy = jest.spyOn(documentService, 'bulkEdit')
-    bulkEditSpy.mockReturnValue(of(true))
+    const reprocessSpy = jest.spyOn(documentService, 'reprocessDocuments')
+    reprocessSpy.mockReturnValue(of(true))
     let openModal: NgbModalRef
     modalService.activeInstances.subscribe((modal) => (openModal = modal[0]))
     const modalSpy = jest.spyOn(modalService, 'open')
@@ -959,7 +959,7 @@ describe('DocumentDetailComponent', () => {
     component.reprocess()
     const modalCloseSpy = jest.spyOn(openModal, 'close')
     openModal.componentInstance.confirmClicked.next()
-    expect(bulkEditSpy).toHaveBeenCalledWith([doc.id], 'reprocess', {})
+    expect(reprocessSpy).toHaveBeenCalledWith([doc.id])
     expect(modalSpy).toHaveBeenCalled()
     expect(toastSpy).toHaveBeenCalled()
     expect(modalCloseSpy).toHaveBeenCalled()
@@ -967,13 +967,13 @@ describe('DocumentDetailComponent', () => {
 
   it('should show error if redo ocr call fails', () => {
     initNormally()
-    const bulkEditSpy = jest.spyOn(documentService, 'bulkEdit')
+    const reprocessSpy = jest.spyOn(documentService, 'reprocessDocuments')
     let openModal: NgbModalRef
     modalService.activeInstances.subscribe((modal) => (openModal = modal[0]))
     const toastSpy = jest.spyOn(toastService, 'showError')
     component.reprocess()
     const modalCloseSpy = jest.spyOn(openModal, 'close')
-    bulkEditSpy.mockReturnValue(throwError(() => new Error('error occurred')))
+    reprocessSpy.mockReturnValue(throwError(() => new Error('error occurred')))
     openModal.componentInstance.confirmClicked.next()
     expect(toastSpy).toHaveBeenCalled()
     expect(modalCloseSpy).not.toHaveBeenCalled()
@@ -1644,9 +1644,9 @@ describe('DocumentDetailComponent', () => {
     expect(
       fixture.debugElement.query(By.css('.preview-sticky img'))
     ).not.toBeUndefined()
-    ;(component.document.mime_type =
+    ;((component.document.mime_type =
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-      fixture.detectChanges()
+      fixture.detectChanges())
     expect(component.archiveContentRenderType).toEqual(
       component.ContentRenderType.Other
     )
@@ -1661,23 +1661,23 @@ describe('DocumentDetailComponent', () => {
     const closeSpy = jest.spyOn(openDocumentsService, 'closeDocument')
     const errorSpy = jest.spyOn(toastService, 'showError')
     initNormally()
+    component.selectedVersionId = 10
     component.editPdf()
     expect(modal).not.toBeUndefined()
     modal.componentInstance.documentID = doc.id
+    expect(modal.componentInstance.versionID).toBe(10)
     modal.componentInstance.pages = [{ page: 1, rotate: 0, splitAfter: false }]
     modal.componentInstance.confirm()
     let req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/edit_pdf/`
     )
     expect(req.request.body).toEqual({
-      documents: [doc.id],
-      method: 'edit_pdf',
-      parameters: {
-        operations: [{ page: 1, rotate: 0, doc: 0 }],
-        delete_original: false,
-        update_document: false,
-        include_metadata: true,
-      },
+      documents: [10],
+      operations: [{ page: 1, rotate: 0, doc: 0 }],
+      delete_original: false,
+      update_document: false,
+      include_metadata: true,
+      source_mode: 'explicit_selection',
     })
     req.error(new ErrorEvent('failed'))
     expect(errorSpy).toHaveBeenCalled()
@@ -1688,7 +1688,7 @@ describe('DocumentDetailComponent', () => {
     modal.componentInstance.deleteOriginal = true
     modal.componentInstance.confirm()
     req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/edit_pdf/`
     )
     req.flush(true)
     expect(closeSpy).toHaveBeenCalled()
@@ -1698,6 +1698,7 @@ describe('DocumentDetailComponent', () => {
     let modal: NgbModalRef
     modalService.activeInstances.subscribe((m) => (modal = m[0]))
     initNormally()
+    component.selectedVersionId = 10
     component.password = 'secret'
     component.removePassword()
     const dialog =
@@ -1707,17 +1708,15 @@ describe('DocumentDetailComponent', () => {
     dialog.deleteOriginal = true
     dialog.confirm()
     const req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/remove_password/`
     )
     expect(req.request.body).toEqual({
-      documents: [doc.id],
-      method: 'remove_password',
-      parameters: {
-        password: 'secret',
-        update_document: false,
-        include_metadata: false,
-        delete_original: true,
-      },
+      documents: [10],
+      password: 'secret',
+      update_document: false,
+      include_metadata: false,
+      delete_original: true,
+      source_mode: 'explicit_selection',
     })
     req.flush(true)
   })
@@ -1732,7 +1731,7 @@ describe('DocumentDetailComponent', () => {
 
     expect(errorSpy).toHaveBeenCalled()
     httpTestingController.expectNone(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/remove_password/`
     )
   })
 
@@ -1748,7 +1747,7 @@ describe('DocumentDetailComponent', () => {
       modal.componentInstance as PasswordRemovalConfirmDialogComponent
     dialog.confirm()
     const req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/remove_password/`
     )
     req.error(new ErrorEvent('failed'))
 
@@ -1769,7 +1768,7 @@ describe('DocumentDetailComponent', () => {
       modal.componentInstance as PasswordRemovalConfirmDialogComponent
     dialog.confirm()
     const req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}documents/bulk_edit/`
+      `${environment.apiBaseUrl}documents/remove_password/`
     )
     req.flush(true)
 

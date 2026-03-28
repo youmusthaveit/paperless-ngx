@@ -1,73 +1,105 @@
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
 import pytest
+from django.core.checks import ERROR
 from django.core.checks import Error
 from django.core.checks import Warning
-from django.test import TestCase
-from django.test import override_settings
+from pytest_django.fixtures import SettingsWrapper
 from pytest_mock import MockerFixture
 
-from documents.tests.utils import DirectoriesMixin
-from documents.tests.utils import FileSystemAssertsMixin
 from paperless.checks import audit_log_check
 from paperless.checks import binaries_check
+from paperless.checks import check_default_language_available
 from paperless.checks import check_deprecated_db_settings
+from paperless.checks import check_remote_parser_configured
 from paperless.checks import check_v3_minimum_upgrade_version
 from paperless.checks import debug_mode_check
 from paperless.checks import paths_check
 from paperless.checks import settings_values_check
 
 
-class TestChecks(DirectoriesMixin, TestCase):
-    def test_binaries(self) -> None:
-        self.assertEqual(binaries_check(None), [])
+@dataclass(frozen=True, slots=True)
+class PaperlessTestDirs:
+    data_dir: Path
+    media_dir: Path
+    consumption_dir: Path
 
-    @override_settings(CONVERT_BINARY="uuuhh")
-    def test_binaries_fail(self) -> None:
-        self.assertEqual(len(binaries_check(None)), 1)
 
-    def test_paths_check(self) -> None:
-        self.assertEqual(paths_check(None), [])
+# TODO: consolidate with documents/tests/conftest.py PaperlessDirs/paperless_dirs
+#       once the paperless and documents test suites are ready to share fixtures.
+@pytest.fixture()
+def directories(tmp_path: Path, settings: SettingsWrapper) -> PaperlessTestDirs:
+    data_dir = tmp_path / "data"
+    media_dir = tmp_path / "media"
+    consumption_dir = tmp_path / "consumption"
 
-    @override_settings(
-        MEDIA_ROOT=Path("uuh"),
-        DATA_DIR=Path("whatever"),
-        CONSUMPTION_DIR=Path("idontcare"),
+    for d in (data_dir, media_dir, consumption_dir):
+        d.mkdir()
+
+    settings.DATA_DIR = data_dir
+    settings.MEDIA_ROOT = media_dir
+    settings.CONSUMPTION_DIR = consumption_dir
+
+    return PaperlessTestDirs(
+        data_dir=data_dir,
+        media_dir=media_dir,
+        consumption_dir=consumption_dir,
     )
-    def test_paths_check_dont_exist(self) -> None:
+
+
+class TestChecks:
+    def test_binaries(self) -> None:
+        assert binaries_check(None) == []
+
+    def test_binaries_fail(self, settings: SettingsWrapper) -> None:
+        settings.CONVERT_BINARY = "uuuhh"
+        assert len(binaries_check(None)) == 1
+
+    @pytest.mark.usefixtures("directories")
+    def test_paths_check(self) -> None:
+        assert paths_check(None) == []
+
+    def test_paths_check_dont_exist(self, settings: SettingsWrapper) -> None:
+        settings.MEDIA_ROOT = Path("uuh")
+        settings.DATA_DIR = Path("whatever")
+        settings.CONSUMPTION_DIR = Path("idontcare")
+
         msgs = paths_check(None)
-        self.assertEqual(len(msgs), 3, str(msgs))
 
+        assert len(msgs) == 3, str(msgs)
         for msg in msgs:
-            self.assertTrue(msg.msg.endswith("is set but doesn't exist."))
+            assert msg.msg.endswith("is set but doesn't exist.")
 
-    def test_paths_check_no_access(self) -> None:
-        Path(self.dirs.data_dir).chmod(0o000)
-        Path(self.dirs.media_dir).chmod(0o000)
-        Path(self.dirs.consumption_dir).chmod(0o000)
+    def test_paths_check_no_access(self, directories: PaperlessTestDirs) -> None:
+        directories.data_dir.chmod(0o000)
+        directories.media_dir.chmod(0o000)
+        directories.consumption_dir.chmod(0o000)
 
-        self.addCleanup(os.chmod, self.dirs.data_dir, 0o777)
-        self.addCleanup(os.chmod, self.dirs.media_dir, 0o777)
-        self.addCleanup(os.chmod, self.dirs.consumption_dir, 0o777)
+        try:
+            msgs = paths_check(None)
+        finally:
+            directories.data_dir.chmod(0o777)
+            directories.media_dir.chmod(0o777)
+            directories.consumption_dir.chmod(0o777)
 
-        msgs = paths_check(None)
-        self.assertEqual(len(msgs), 3)
-
+        assert len(msgs) == 3
         for msg in msgs:
-            self.assertTrue(msg.msg.endswith("is not writeable"))
+            assert msg.msg.endswith("is not writeable")
 
-    @override_settings(DEBUG=False)
-    def test_debug_disabled(self) -> None:
-        self.assertEqual(debug_mode_check(None), [])
+    def test_debug_disabled(self, settings: SettingsWrapper) -> None:
+        settings.DEBUG = False
+        assert debug_mode_check(None) == []
 
-    @override_settings(DEBUG=True)
-    def test_debug_enabled(self) -> None:
-        self.assertEqual(len(debug_mode_check(None)), 1)
+    def test_debug_enabled(self, settings: SettingsWrapper) -> None:
+        settings.DEBUG = True
+        assert len(debug_mode_check(None)) == 1
 
 
-class TestSettingsChecksAgainstDefaults(DirectoriesMixin, TestCase):
+class TestSettingsChecksAgainstDefaults:
     def test_all_valid(self) -> None:
         """
         GIVEN:
@@ -78,104 +110,71 @@ class TestSettingsChecksAgainstDefaults(DirectoriesMixin, TestCase):
             - No system check errors reported
         """
         msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 0)
+        assert len(msgs) == 0
 
 
-class TestOcrSettingsChecks(DirectoriesMixin, TestCase):
-    @override_settings(OCR_OUTPUT_TYPE="notapdf")
-    def test_invalid_output_type(self) -> None:
+class TestOcrSettingsChecks:
+    @pytest.mark.parametrize(
+        ("setting", "value", "expected_msg"),
+        [
+            pytest.param(
+                "OCR_OUTPUT_TYPE",
+                "notapdf",
+                'OCR output type "notapdf"',
+                id="invalid-output-type",
+            ),
+            pytest.param(
+                "OCR_MODE",
+                "makeitso",
+                'OCR output mode "makeitso"',
+                id="invalid-mode",
+            ),
+            pytest.param(
+                "OCR_MODE",
+                "skip_noarchive",
+                "deprecated",
+                id="deprecated-mode",
+            ),
+            pytest.param(
+                "OCR_SKIP_ARCHIVE_FILE",
+                "invalid",
+                'OCR_SKIP_ARCHIVE_FILE setting "invalid"',
+                id="invalid-skip-archive-file",
+            ),
+            pytest.param(
+                "OCR_CLEAN",
+                "cleanme",
+                'OCR clean mode "cleanme"',
+                id="invalid-clean",
+            ),
+        ],
+    )
+    def test_invalid_setting_produces_one_error(
+        self,
+        settings: SettingsWrapper,
+        setting: str,
+        value: str,
+        expected_msg: str,
+    ) -> None:
         """
         GIVEN:
             - Default settings
-            - OCR output type is invalid
+            - One OCR setting is set to an invalid value
         WHEN:
             - Settings are validated
         THEN:
-            - system check error reported for OCR output type
+            - Exactly one system check error is reported containing the expected message
         """
+        setattr(settings, setting, value)
+
         msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
 
-        msg = msgs[0]
-
-        self.assertIn('OCR output type "notapdf"', msg.msg)
-
-    @override_settings(OCR_MODE="makeitso")
-    def test_invalid_ocr_type(self) -> None:
-        """
-        GIVEN:
-            - Default settings
-            - OCR type is invalid
-        WHEN:
-            - Settings are validated
-        THEN:
-            - system check error reported for OCR type
-        """
-        msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
-
-        msg = msgs[0]
-
-        self.assertIn('OCR output mode "makeitso"', msg.msg)
-
-    @override_settings(OCR_MODE="skip_noarchive")
-    def test_deprecated_ocr_type(self) -> None:
-        """
-        GIVEN:
-            - Default settings
-            - OCR type is deprecated
-        WHEN:
-            - Settings are validated
-        THEN:
-            - deprecation warning reported for OCR type
-        """
-        msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
-
-        msg = msgs[0]
-
-        self.assertIn("deprecated", msg.msg)
-
-    @override_settings(OCR_SKIP_ARCHIVE_FILE="invalid")
-    def test_invalid_ocr_skip_archive_file(self) -> None:
-        """
-        GIVEN:
-            - Default settings
-            - OCR_SKIP_ARCHIVE_FILE is invalid
-        WHEN:
-            - Settings are validated
-        THEN:
-            - system check error reported for OCR_SKIP_ARCHIVE_FILE
-        """
-        msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
-
-        msg = msgs[0]
-
-        self.assertIn('OCR_SKIP_ARCHIVE_FILE setting "invalid"', msg.msg)
-
-    @override_settings(OCR_CLEAN="cleanme")
-    def test_invalid_ocr_clean(self) -> None:
-        """
-        GIVEN:
-            - Default settings
-            - OCR cleaning type is invalid
-        WHEN:
-            - Settings are validated
-        THEN:
-            - system check error reported for OCR cleaning type
-        """
-        msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
-
-        msg = msgs[0]
-
-        self.assertIn('OCR clean mode "cleanme"', msg.msg)
+        assert len(msgs) == 1
+        assert expected_msg in msgs[0].msg
 
 
-class TestTimezoneSettingsChecks(DirectoriesMixin, TestCase):
-    @override_settings(TIME_ZONE="TheMoon\\MyCrater")
-    def test_invalid_timezone(self) -> None:
+class TestTimezoneSettingsChecks:
+    def test_invalid_timezone(self, settings: SettingsWrapper) -> None:
         """
         GIVEN:
             - Default settings
@@ -185,17 +184,16 @@ class TestTimezoneSettingsChecks(DirectoriesMixin, TestCase):
         THEN:
             - system check error reported for timezone
         """
+        settings.TIME_ZONE = "TheMoon\\MyCrater"
+
         msgs = settings_values_check(None)
-        self.assertEqual(len(msgs), 1)
 
-        msg = msgs[0]
-
-        self.assertIn('Timezone "TheMoon\\MyCrater"', msg.msg)
+        assert len(msgs) == 1
+        assert 'Timezone "TheMoon\\MyCrater"' in msgs[0].msg
 
 
-class TestEmailCertSettingsChecks(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
-    @override_settings(EMAIL_CERTIFICATE_FILE=Path("/tmp/not_actually_here.pem"))
-    def test_not_valid_file(self) -> None:
+class TestEmailCertSettingsChecks:
+    def test_not_valid_file(self, settings: SettingsWrapper) -> None:
         """
         GIVEN:
             - Default settings
@@ -205,19 +203,22 @@ class TestEmailCertSettingsChecks(DirectoriesMixin, FileSystemAssertsMixin, Test
         THEN:
             - system check error reported for email certificate
         """
-        self.assertIsNotFile("/tmp/not_actually_here.pem")
+        cert_path = Path("/tmp/not_actually_here.pem")
+        assert not cert_path.is_file()
+        settings.EMAIL_CERTIFICATE_FILE = cert_path
 
         msgs = settings_values_check(None)
 
-        self.assertEqual(len(msgs), 1)
-
-        msg = msgs[0]
-
-        self.assertIn("Email cert /tmp/not_actually_here.pem is not a file", msg.msg)
+        assert len(msgs) == 1
+        assert "Email cert /tmp/not_actually_here.pem is not a file" in msgs[0].msg
 
 
-class TestAuditLogChecks(TestCase):
-    def test_was_enabled_once(self) -> None:
+class TestAuditLogChecks:
+    def test_was_enabled_once(
+        self,
+        settings: SettingsWrapper,
+        mocker: MockerFixture,
+    ) -> None:
         """
         GIVEN:
             - Audit log is not enabled
@@ -226,23 +227,18 @@ class TestAuditLogChecks(TestCase):
         THEN:
             - system check error reported for disabling audit log
         """
-        introspect_mock = mock.MagicMock()
+        settings.AUDIT_LOG_ENABLED = False
+        introspect_mock = mocker.MagicMock()
         introspect_mock.introspection.table_names.return_value = ["auditlog_logentry"]
-        with override_settings(AUDIT_LOG_ENABLED=False):
-            with mock.patch.dict(
-                "paperless.checks.connections",
-                {"default": introspect_mock},
-            ):
-                msgs = audit_log_check(None)
+        mocker.patch.dict(
+            "paperless.checks.connections",
+            {"default": introspect_mock},
+        )
 
-                self.assertEqual(len(msgs), 1)
+        msgs = audit_log_check(None)
 
-                msg = msgs[0]
-
-                self.assertIn(
-                    ("auditlog table was found but audit log is disabled."),
-                    msg.msg,
-                )
+        assert len(msgs) == 1
+        assert "auditlog table was found but audit log is disabled." in msgs[0].msg
 
 
 DEPRECATED_VARS: dict[str, str] = {
@@ -271,20 +267,16 @@ class TestDeprecatedDbSettings:
     @pytest.mark.parametrize(
         ("env_var", "db_option_key"),
         [
-            ("PAPERLESS_DB_TIMEOUT", "timeout"),
-            ("PAPERLESS_DB_POOLSIZE", "pool.min_size / pool.max_size"),
-            ("PAPERLESS_DBSSLMODE", "sslmode"),
-            ("PAPERLESS_DBSSLROOTCERT", "sslrootcert"),
-            ("PAPERLESS_DBSSLCERT", "sslcert"),
-            ("PAPERLESS_DBSSLKEY", "sslkey"),
-        ],
-        ids=[
-            "db-timeout",
-            "db-poolsize",
-            "ssl-mode",
-            "ssl-rootcert",
-            "ssl-cert",
-            "ssl-key",
+            pytest.param("PAPERLESS_DB_TIMEOUT", "timeout", id="db-timeout"),
+            pytest.param(
+                "PAPERLESS_DB_POOLSIZE",
+                "pool.min_size / pool.max_size",
+                id="db-poolsize",
+            ),
+            pytest.param("PAPERLESS_DBSSLMODE", "sslmode", id="ssl-mode"),
+            pytest.param("PAPERLESS_DBSSLROOTCERT", "sslrootcert", id="ssl-rootcert"),
+            pytest.param("PAPERLESS_DBSSLCERT", "sslcert", id="ssl-cert"),
+            pytest.param("PAPERLESS_DBSSLKEY", "sslkey", id="ssl-key"),
         ],
     )
     def test_single_deprecated_var_produces_one_warning(
@@ -403,7 +395,10 @@ class TestV3MinimumUpgradeVersionCheck:
     """Test suite for check_v3_minimum_upgrade_version system check."""
 
     @pytest.fixture
-    def build_conn_mock(self, mocker: MockerFixture):
+    def build_conn_mock(
+        self,
+        mocker: MockerFixture,
+    ) -> Callable[[list[str], list[str]], mock.MagicMock]:
         """Factory fixture that builds a connections['default'] mock.
 
         Usage::
@@ -423,7 +418,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_no_migrations_table_fresh_install(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -442,7 +437,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_no_documents_migrations_fresh_install(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -461,7 +456,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_v3_state_with_0001_squashed(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -485,7 +480,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_v3_state_with_0002_squashed_only(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -504,7 +499,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_v2_20_9_state_ready_to_upgrade(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -531,7 +526,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_v2_20_8_raises_error(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -558,7 +553,7 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_very_old_version_raises_error(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
@@ -585,15 +580,15 @@ class TestV3MinimumUpgradeVersionCheck:
     def test_error_hint_mentions_v2_20_9(
         self,
         mocker: MockerFixture,
-        build_conn_mock,
+        build_conn_mock: Callable[[list[str], list[str]], mock.MagicMock],
     ) -> None:
         """
         GIVEN:
-            - DB is on an old v2 version (pre-v2.20.9)
+            - DB is on an old v2 version (pre-v2.20.10)
         WHEN:
             - The v3 upgrade check runs
         THEN:
-            - The error hint explicitly references v2.20.9 so users know what to do
+            - The error hint explicitly references v2.20.10 so users know what to do
         """
         mocker.patch.dict(
             "paperless.checks.connections",
@@ -601,7 +596,7 @@ class TestV3MinimumUpgradeVersionCheck:
         )
         result = check_v3_minimum_upgrade_version(None)
         assert len(result) == 1
-        assert "v2.20.9" in result[0].hint
+        assert "v2.20.10" in result[0].hint
 
     def test_db_error_is_swallowed(self, mocker: MockerFixture) -> None:
         """
@@ -634,3 +629,116 @@ class TestV3MinimumUpgradeVersionCheck:
         conn.introspection.table_names.side_effect = OperationalError("DB unavailable")
         mocker.patch.dict("paperless.checks.connections", {"default": conn})
         assert check_v3_minimum_upgrade_version(None) == []
+
+
+class TestRemoteParserChecks:
+    def test_no_engine(self, settings: SettingsWrapper) -> None:
+        settings.REMOTE_OCR_ENGINE = None
+        msgs = check_remote_parser_configured(None)
+
+        assert len(msgs) == 0
+
+    def test_azure_no_endpoint(self, settings: SettingsWrapper) -> None:
+
+        settings.REMOTE_OCR_ENGINE = "azureai"
+        settings.REMOTE_OCR_API_KEY = "somekey"
+        settings.REMOTE_OCR_ENDPOINT = None
+
+        msgs = check_remote_parser_configured(None)
+
+        assert len(msgs) == 1
+
+        msg = msgs[0]
+
+        assert (
+            "Azure AI remote parser requires endpoint and API key to be configured."
+            in msg.msg
+        )
+
+
+class TestTesseractChecks:
+    def test_default_language(self) -> None:
+        check_default_language_available(None)
+
+    def test_no_language(self, settings: SettingsWrapper) -> None:
+
+        settings.OCR_LANGUAGE = ""
+
+        msgs = check_default_language_available(None)
+
+        assert len(msgs) == 1
+        msg = msgs[0]
+
+        assert (
+            "No OCR language has been specified with PAPERLESS_OCR_LANGUAGE" in msg.msg
+        )
+
+    def test_invalid_language(
+        self,
+        settings: SettingsWrapper,
+        mocker: MockerFixture,
+    ) -> None:
+
+        settings.OCR_LANGUAGE = "ita"
+
+        tesser_lang_mock = mocker.patch("paperless.checks.get_tesseract_langs")
+        tesser_lang_mock.return_value = ["deu", "eng"]
+
+        msgs = check_default_language_available(None)
+
+        assert len(msgs) == 1
+        msg = msgs[0]
+
+        assert msg.level == ERROR
+        assert "The selected ocr language ita is not installed" in msg.msg
+
+    def test_multi_part_language(
+        self,
+        settings: SettingsWrapper,
+        mocker: MockerFixture,
+    ) -> None:
+        """
+        GIVEN:
+            - An OCR language which is multi part (ie chi-sim)
+            - The language is correctly formatted
+        WHEN:
+            - Installed packages are checked
+        THEN:
+            - No errors are reported
+        """
+
+        settings.OCR_LANGUAGE = "chi_sim"
+
+        tesser_lang_mock = mocker.patch("paperless.checks.get_tesseract_langs")
+        tesser_lang_mock.return_value = ["chi_sim", "eng"]
+
+        msgs = check_default_language_available(None)
+
+        assert len(msgs) == 0
+
+    def test_multi_part_language_bad_format(
+        self,
+        settings: SettingsWrapper,
+        mocker: MockerFixture,
+    ) -> None:
+        """
+        GIVEN:
+            - An OCR language which is multi part (ie chi-sim)
+            - The language is correctly NOT formatted
+        WHEN:
+            - Installed packages are checked
+        THEN:
+            - No errors are reported
+        """
+        settings.OCR_LANGUAGE = "chi-sim"
+
+        tesser_lang_mock = mocker.patch("paperless.checks.get_tesseract_langs")
+        tesser_lang_mock.return_value = ["chi_sim", "eng"]
+
+        msgs = check_default_language_available(None)
+
+        assert len(msgs) == 1
+        msg = msgs[0]
+
+        assert msg.level == ERROR
+        assert "The selected ocr language chi-sim is not installed" in msg.msg
