@@ -4,7 +4,7 @@ from django.db import models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("paperless", "0008_s3storageconfiguration_prefix"),
+        ("paperless", "0007_s3storageconfiguration_and_selection"),
     ]
 
     operations = [
