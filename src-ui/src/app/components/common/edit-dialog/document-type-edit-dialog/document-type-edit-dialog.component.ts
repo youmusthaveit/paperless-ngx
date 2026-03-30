@@ -6,6 +6,7 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms'
+import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
 import { EditDialogComponent } from 'src/app/components/common/edit-dialog/edit-dialog.component'
 import { CustomField } from 'src/app/data/custom-field'
 import { DocumentType } from 'src/app/data/document-type'
@@ -43,6 +44,8 @@ const XRECHNUNG_FIELD_OPTIONS = [
   { id: 'buyer_email', name: $localize`Buyer email` },
 ]
 
+const XRECHNUNG_CORRESPONDENT_TARGET = 'correspondent'
+
 @Component({
   selector: 'pngx-document-type-edit-dialog',
   templateUrl: './document-type-edit-dialog.component.html',
@@ -55,6 +58,7 @@ const XRECHNUNG_FIELD_OPTIONS = [
     IfOwnerDirective,
     FormsModule,
     ReactiveFormsModule,
+    NgxBootstrapIconsModule,
   ],
 })
 export class DocumentTypeEditDialogComponent
@@ -63,6 +67,7 @@ export class DocumentTypeEditDialogComponent
 {
   customFields: CustomField[] = []
   xrechnungFieldOptions = XRECHNUNG_FIELD_OPTIONS
+  xrechnungMappingsExpanded = false
   private readonly documentTypeService = inject(DocumentTypeService)
   private readonly toastService = inject(ToastService)
   xrechnungActionRunning = false
@@ -96,6 +101,13 @@ export class DocumentTypeEditDialogComponent
     return this.objectForm.get('xrechnung_custom_field_mappings') as FormArray
   }
 
+  get xrechnungTargetOptions() {
+    return [
+      { id: XRECHNUNG_CORRESPONDENT_TARGET, name: $localize`Correspondent` },
+      ...this.customFields,
+    ]
+  }
+
   getForm(): FormGroup {
     return new FormGroup({
       name: new FormControl(''),
@@ -113,7 +125,7 @@ export class DocumentTypeEditDialogComponent
   addXRechnungMapping() {
     this.xrechnungMappings.push(
       new FormGroup({
-        custom_field: new FormControl(null),
+        custom_field: new FormControl<number | string | null>(null),
         source: new FormControl(null),
       })
     )
@@ -146,10 +158,35 @@ export class DocumentTypeEditDialogComponent
     })
   }
 
+  protected override getFormValues(): any {
+    const formValues = super.getFormValues()
+    const rawMappings = formValues.xrechnung_custom_field_mappings ?? []
+
+    const correspondentMapping = rawMappings.find(
+      (mapping) => mapping?.custom_field === XRECHNUNG_CORRESPONDENT_TARGET
+    )
+
+    formValues.xrechnung_correspondent_field =
+      correspondentMapping?.source ?? null
+    formValues.xrechnung_custom_field_mappings = rawMappings.filter(
+      (mapping) => typeof mapping?.custom_field === 'number'
+    )
+
+    return formValues
+  }
+
   private setXRechnungMappings(
     mappings: DocumentType['xrechnung_custom_field_mappings']
   ) {
     this.xrechnungMappings.clear()
+    if (this.object?.xrechnung_correspondent_field) {
+      this.xrechnungMappings.push(
+        new FormGroup({
+          custom_field: new FormControl(XRECHNUNG_CORRESPONDENT_TARGET),
+          source: new FormControl(this.object.xrechnung_correspondent_field),
+        })
+      )
+    }
     mappings?.forEach((mapping) =>
       this.xrechnungMappings.push(
         new FormGroup({
