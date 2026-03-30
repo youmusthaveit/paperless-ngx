@@ -15,6 +15,7 @@ import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service
 import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
 import { UserService } from 'src/app/services/rest/user.service'
 import { SettingsService } from 'src/app/services/settings.service'
+import { ToastService } from 'src/app/services/toast.service'
 import { CheckComponent } from '../../input/check/check.component'
 import { PermissionsFormComponent } from '../../input/permissions/permissions-form/permissions-form.component'
 import { SelectComponent } from '../../input/select/select.component'
@@ -62,10 +63,13 @@ export class DocumentTypeEditDialogComponent
 {
   customFields: CustomField[] = []
   xrechnungFieldOptions = XRECHNUNG_FIELD_OPTIONS
+  private readonly documentTypeService = inject(DocumentTypeService)
+  private readonly toastService = inject(ToastService)
+  xrechnungActionRunning = false
 
   constructor() {
     super()
-    this.service = inject(DocumentTypeService)
+    this.service = this.documentTypeService
     this.userService = inject(UserService)
     this.settingsService = inject(SettingsService)
     inject(CustomFieldsService)
@@ -117,6 +121,27 @@ export class DocumentTypeEditDialogComponent
 
   removeXRechnungMapping(index: number) {
     this.xrechnungMappings.removeAt(index)
+  }
+
+  applyXRechnungMappings() {
+    if (!this.object?.id || this.xrechnungActionRunning) {
+      return
+    }
+
+    this.xrechnungActionRunning = true
+    this.documentTypeService.applyXRechnungMappings(this.object.id).subscribe({
+      next: (result) => {
+        this.xrechnungActionRunning = false
+        this.toastService.showInfo(result.detail)
+      },
+      error: (error) => {
+        this.xrechnungActionRunning = false
+        this.toastService.showError(
+          $localize`Error while applying XRechnung mappings.`,
+          error
+        )
+      },
+    })
   }
 
   private setXRechnungMappings(

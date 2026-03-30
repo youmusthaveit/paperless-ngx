@@ -17,6 +17,8 @@ from documents.models import DocumentType
 from documents.models import StoragePath
 from documents.models import Tag
 from documents.tests.utils import DirectoriesMixin
+from paperless.parsers.xrechnung import InvoiceData
+from paperless.parsers.xrechnung import InvoiceParty
 
 
 class TestApiObjects(DirectoriesMixin, APITestCase):
@@ -793,6 +795,118 @@ class TestApiDocumentTypes(DirectoriesMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("enable_xrechnung_import", response.data)
+
+    def test_api_updating_xrechnung_mappings_does_not_modify_existing_documents(
+        self,
+    ) -> None:
+        custom_field = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(
+            name="XRechnung",
+            enable_xrechnung_import=True,
+        )
+        document = Document.objects.create(
+            title="existing metadata",
+            content="content",
+            checksum="doc-type-update-1",
+            mime_type="application/xml",
+            document_type=document_type,
+        )
+        CustomFieldInstance.objects.create(
+            document=document,
+            field=custom_field,
+            value_text="keep-me",
+        )
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}{document_type.pk}/",
+            data={
+                "xrechnung_custom_field_mappings": [
+                    {
+                        "custom_field": custom_field.pk,
+                        "source": "invoice_number",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        document.refresh_from_db()
+
+        self.assertEqual(
+            document.custom_fields.get(field=custom_field).value,
+            "keep-me",
+        )
+
+    @mock.patch("documents.serialisers.parse_xrechnung_invoice")
+    def test_api_apply_xrechnung_mappings_action_updates_existing_documents(
+        self,
+        mock_parse_xrechnung_invoice,
+    ) -> None:
+        custom_field = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(
+            name="XRechnung",
+            enable_xrechnung_import=True,
+            xrechnung_correspondent_field="seller_name",
+            xrechnung_custom_field_mappings=[
+                {
+                    "custom_field": custom_field.pk,
+                    "source": "invoice_number",
+                },
+            ],
+        )
+        document = Document.objects.create(
+            title="xrechnung",
+            content="content",
+            checksum="doc-type-update-2",
+            mime_type="application/xml",
+            document_type=document_type,
+        )
+        document.source_write_bytes(b"<invoice />")
+        CustomFieldInstance.objects.create(
+            document=document,
+            field=custom_field,
+            value_text="old-value",
+        )
+        mock_parse_xrechnung_invoice.return_value = InvoiceData(
+            profile="xrechnung",
+            invoice_number="1122334455",
+            invoice_type_code=None,
+            issue_date=None,
+            due_amount=None,
+            grand_total=None,
+            tax_total=None,
+            currency="EUR",
+            buyer_reference=None,
+            payment_reference=None,
+            payment_terms=None,
+            seller=InvoiceParty(name="TÜV Rheinland GmbH"),
+            buyer=InvoiceParty(),
+            notes=[],
+            lines=[],
+            raw_text="",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{document_type.pk}/apply_xrechnung_mappings/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["updated_documents"], 1)
+        document.refresh_from_db()
+
+        self.assertEqual(document.correspondent.name, "TÜV Rheinland GmbH")
+        self.assertEqual(
+            document.custom_fields.get(field=custom_field).value,
+            "1122334455",
+        )
 
 
 class TestBulkEditObjects(APITestCase):

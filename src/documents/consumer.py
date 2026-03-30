@@ -713,6 +713,12 @@ class ConsumerPlugin(
             .first()
         )
         if document_type is None:
+            document_types = list(
+                DocumentType.objects.select_related("owner")[:2],
+            )
+            if len(document_types) == 1:
+                document_type = document_types[0]
+        if document_type is None:
             return
 
         if self.metadata.document_type_id is None:

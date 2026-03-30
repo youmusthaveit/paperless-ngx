@@ -37,7 +37,19 @@
         <div class="mb-2">
           <div class="d-flex justify-content-between align-items-center">
             <label class="form-label mb-0" i18n>XRechnung custom field mappings</label>
-            <button type="button" class="btn btn-sm btn-outline-primary" (click)="addXRechnungMapping()" i18n>Add mapping</button>
+            <div class="d-flex gap-2">
+              @if (object?.id) {
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  [disabled]="xrechnungActionRunning || networkActive"
+                  (click)="applyXRechnungMappings()"
+                  i18n>
+                  Apply mappings to documents
+                </button>
+              }
+              <button type="button" class="btn btn-sm btn-outline-primary" (click)="addXRechnungMapping()" i18n>Add mapping</button>
+            </div>
           </div>
           <div formArrayName="xrechnung_custom_field_mappings" class="mt-2">
             @for (mapping of xrechnungMappings.controls; track mapping; let i = $index) {

@@ -586,6 +586,57 @@ class DocumentTypeViewSet(PermissionsAwareDocumentCountMixin, ModelViewSet):
     filterset_class = DocumentTypeFilterSet
     ordering_fields = ("name", "matching_algorithm", "match", "document_count")
 
+    @extend_schema(
+        operation_id="document_types_apply_xrechnung_mappings",
+        description="Reapply XRechnung mappings to existing documents of this document type.",
+        responses={
+            200: inline_serializer(
+                name="DocumentTypeApplyXRechnungMappingsResult",
+                fields={
+                    "detail": serializers.CharField(),
+                    "updated_documents": serializers.IntegerField(),
+                },
+            ),
+        },
+    )
+    @action(methods=["post"], detail=True)
+    def apply_xrechnung_mappings(self, request, pk=None):
+        document_type = self.get_object()
+        documents = get_objects_for_user_owner_aware(
+            request.user,
+            "change_document",
+            Document,
+        ).filter(
+            document_type=document_type,
+            mime_type__in={"application/xml", "text/xml"},
+        )
+
+        serializer = DocumentSerializer(context={"request": request})
+        updated_documents = 0
+
+        for document in documents.iterator():
+            serializer._apply_xrechnung_field_transfer(
+                document,
+                overwrite_correspondent=True,
+                overwrite_custom_fields=True,
+            )
+            index.add_or_update_document(document)
+            document_updated.send(
+                sender=self.__class__,
+                document=document,
+            )
+            updated_documents += 1
+
+        return Response(
+            {
+                "detail": _(
+                    "Applied XRechnung mappings to %(count)s document(s).",
+                )
+                % {"count": updated_documents},
+                "updated_documents": updated_documents,
+            },
+        )
+
 
 @extend_schema_serializer(
     component_name="EmailDocumentRequest",

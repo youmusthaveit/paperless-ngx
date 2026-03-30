@@ -513,6 +513,40 @@ class TestConsumer(
         )
         self._assert_first_last_send_progress()
 
+    def testXRechnungUsesSingleDocumentTypeAutomatically(self) -> None:
+        custom_field_text = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        DocumentType.objects.create(
+            name="Only Document Type",
+            xrechnung_correspondent_field="seller_name",
+            xrechnung_custom_field_mappings=[
+                {
+                    "custom_field": custom_field_text.pk,
+                    "source": "invoice_number",
+                },
+            ],
+        )
+
+        with mock.patch("documents.consumer.get_parser_registry") as mock_registry:
+            mock_registry.return_value.get_parser_for_file.return_value = (
+                SyntheticXRechnungParser
+            )
+
+            with self.get_consumer(self.get_test_file()) as consumer:
+                consumer.run()
+
+                document = Document.objects.first()
+
+        self.assertEqual(document.document_type.name, "Only Document Type")
+        self.assertEqual(document.correspondent.name, "ACME Corp")
+        self.assertEqual(
+            document.custom_fields.get(field=custom_field_text).value,
+            "XR-123",
+        )
+        self._assert_first_last_send_progress()
+
     def testOverrideAsn(self) -> None:
         with self.get_consumer(
             self.get_test_file(),
