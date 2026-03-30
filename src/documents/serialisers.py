@@ -510,6 +510,11 @@ class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
         queryset=CustomField.objects.all(),
         required=False,
     )
+    retention_period_years = serializers.IntegerField(
+        allow_null=True,
+        min_value=1,
+        required=False,
+    )
     xrechnung_correspondent_field = serializers.ChoiceField(
         choices=[(field, field) for field in XRECHNUNG_SOURCE_FIELDS],
         allow_blank=True,
@@ -610,6 +615,7 @@ class DocumentTypeSerializer(MatchingModelSerializer, OwnedObjectSerializer):
             "is_insensitive",
             "document_count",
             "custom_fields",
+            "retention_period_years",
             "enable_xrechnung_import",
             "xrechnung_correspondent_field",
             "xrechnung_custom_field_mappings",
@@ -1102,6 +1108,11 @@ class DocumentSerializer(
     archived_file_name = SerializerMethodField()
     archived_file_path = SerializerMethodField()
     created_date = serializers.DateField(required=False)
+    delete_allowed_at = serializers.DateField(
+        required=False,
+        allow_null=True,
+        read_only=True,
+    )
     page_count = SerializerMethodField()
     duplicate_documents = SerializerMethodField()
 
@@ -1237,6 +1248,13 @@ class DocumentSerializer(
         return super().validate(attrs)
 
     def update(self, instance: Document, validated_data):
+        if instance.delete_allowed_at is not None:
+            raise serializers.ValidationError(
+                _(
+                    "Document details and content cannot be changed after the retention period has been written.",
+                ),
+            )
+
         document_type_changed = "document_type" in validated_data
         correspondent_changed = "correspondent" in validated_data
         custom_fields_changed = "custom_fields" in validated_data
@@ -1521,6 +1539,7 @@ class DocumentSerializer(
             "modified",
             "added",
             "deleted_at",
+            "delete_allowed_at",
             "archive_serial_number",
             "original_file_name",
             "archived_file_name",

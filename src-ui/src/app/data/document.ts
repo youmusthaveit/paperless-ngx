@@ -148,6 +148,8 @@ export interface Document extends ObjectWithPermissions {
 
   deleted_at?: string // ISO string
 
+  delete_allowed_at?: string // ISO string/date string
+
   original_file_name?: string
 
   archived_file_name?: string

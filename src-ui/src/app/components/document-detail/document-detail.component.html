@@ -20,7 +20,7 @@
     </div>
   }
 
-  <button type="button" class="btn btn-sm btn-outline-danger me-md-4" (click)="delete()" [disabled]="!userIsOwner" *pngxIfPermissions="{ action: PermissionAction.Delete, type: PermissionType.Document }">
+  <button type="button" class="btn btn-sm btn-outline-danger me-md-4" (click)="delete()" [disabled]="!userIsOwner || !canDeleteDocument()" [title]="getDeleteRestrictionTitle()" *pngxIfPermissions="{ action: PermissionAction.Delete, type: PermissionType.Document }">
     <i-bs width="1.2em" height="1.2em" name="trash"></i-bs><span class="d-none d-lg-inline ps-1" i18n>Delete</span>
   </button>
 
@@ -75,6 +75,12 @@
       <button ngbDropdownItem (click)="reprocess()" [disabled]="!userCanEdit || !userIsOwner">
         <i-bs width="1em" height="1em" name="arrow-counterclockwise" class="me-1"></i-bs><span i18n>Reprocess</span>
       </button>
+
+      @if (canApplyRetentionPeriod()) {
+        <button ngbDropdownItem (click)="applyRetentionPeriod()" [disabled]="retentionActionRunning || networkActive">
+          <i-bs width="1em" height="1em" name="lock" class="me-1"></i-bs><span i18n>Festschreiben</span>
+        </button>
+      }
 
       @if (canApplyEInvoiceMappings()) {
         <button ngbDropdownItem (click)="applyEInvoiceMappings()" [disabled]="eInvoiceActionRunning || networkActive">
@@ -178,6 +184,9 @@
               }
               <pngx-input-date i18n-title title="Date created" formControlName="created" [suggestions]="suggestions?.dates" [showFilter]="true" [horizontal]="true" (filterDocuments)="filterDocuments($event)"
               [error]="error?.created"></pngx-input-date>
+              @if (document?.delete_allowed_at) {
+                <pngx-input-date i18n-title title="Delete allowed from" formControlName="delete_allowed_at" [horizontal]="true"></pngx-input-date>
+              }
               @if (!isFieldHidden(DocumentDetailFieldID.Correspondent)) {
                 <pngx-input-select [items]="correspondents" i18n-title title="Correspondent" formControlName="correspondent" [allowNull]="true" [showFilter]="true" [horizontal]="true" (filterDocuments)="filterDocuments($event, DataType.Correspondent)"
                 (createNew)="createCorrespondent($event)" [hideAddButton]="createDisabled(DataType.Correspondent)" [suggestions]="suggestions?.correspondents" *pngxIfPermissions="{ action: PermissionAction.View, type: PermissionType.Correspondent }"></pngx-input-select>

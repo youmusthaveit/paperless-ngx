@@ -239,6 +239,102 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         self.assertEqual(doc.correspondent.name, "TÜV Rheinland GmbH")
         self.assertEqual(doc.custom_fields.get(field=custom_field).value, "1122334455")
 
+    def test_patch_document_type_does_not_set_delete_allowed_at_from_retention(
+        self,
+    ) -> None:
+        document_type = DocumentType.objects.create(
+            name="Contract",
+            retention_period_years=10,
+        )
+        doc = Document.objects.create(
+            title="contract",
+            content="content",
+            checksum="123-retention",
+            mime_type="application/pdf",
+            created=date(2024, 3, 15),
+        )
+
+        response = self.client.patch(
+            f"/api/documents/{doc.pk}/",
+            {
+                "document_type": document_type.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+        self.assertIsNone(doc.delete_allowed_at)
+        self.assertIsNone(response.data["delete_allowed_at"])
+
+    def test_apply_retention_period_sets_delete_allowed_at_from_retention(self) -> None:
+        document_type = DocumentType.objects.create(
+            name="Contract",
+            retention_period_years=10,
+        )
+        doc = Document.objects.create(
+            title="contract",
+            content="content",
+            checksum="123-retention-apply",
+            mime_type="application/pdf",
+            created=date(2024, 3, 15),
+            document_type=document_type,
+        )
+
+        response = self.client.post(
+            f"/api/documents/{doc.pk}/apply_retention_period/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+        self.assertEqual(doc.delete_allowed_at, date(2035, 1, 1))
+        self.assertEqual(response.data["delete_allowed_at"], "2035-01-01")
+
+    def test_locked_document_details_cannot_be_updated(self) -> None:
+        doc = Document.objects.create(
+            title="locked",
+            content="content",
+            checksum="123-retention-locked-details",
+            mime_type="application/pdf",
+            delete_allowed_at=date(2035, 1, 1),
+        )
+
+        response = self.client.patch(
+            f"/api/documents/{doc.pk}/",
+            {
+                "title": "updated title",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("non_field_errors", response.data)
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "locked")
+
+    def test_locked_document_content_cannot_be_updated(self) -> None:
+        doc = Document.objects.create(
+            title="locked",
+            content="content",
+            checksum="123-retention-locked-content",
+            mime_type="application/pdf",
+            delete_allowed_at=date(2035, 1, 1),
+        )
+
+        response = self.client.patch(
+            f"/api/documents/{doc.pk}/",
+            {
+                "content": "updated content",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("non_field_errors", response.data)
+        doc.refresh_from_db()
+        self.assertEqual(doc.content, "content")
+
     @mock.patch("documents.serialisers.parse_xrechnung_invoice")
     def test_apply_einvoice_mappings_to_existing_document(
         self,
@@ -751,6 +847,48 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
             response.data[0]["changes"],
             {"Version Deleted": ["None", version_doc.pk]},
         )
+
+    def test_document_delete_blocked_until_delete_allowed_at(self) -> None:
+        doc = Document.objects.create(
+            title="locked",
+            checksum="blocked-delete",
+            mime_type="application/pdf",
+        )
+        Document.objects.filter(pk=doc.pk).update(
+            delete_allowed_at=timezone.localdate() + timedelta(days=5),
+        )
+
+        response = self.client.delete(f"/api/documents/{doc.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        doc.refresh_from_db()
+        self.assertIsNone(doc.deleted_at)
+
+    def test_document_version_delete_blocked_until_delete_allowed_at(self) -> None:
+        root_doc = Document.objects.create(
+            title="Root",
+            checksum="root-locked",
+            mime_type="application/pdf",
+            owner=self.user,
+        )
+        version_doc = Document.objects.create(
+            title="Version",
+            checksum="version-locked",
+            mime_type="application/pdf",
+            root_document=root_doc,
+            owner=self.user,
+        )
+        Document.objects.filter(pk=version_doc.pk).update(
+            delete_allowed_at=timezone.localdate() + timedelta(days=5),
+        )
+
+        response = self.client.delete(
+            f"/api/documents/{root_doc.pk}/versions/{version_doc.pk}/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        version_doc.refresh_from_db()
+        self.assertIsNone(version_doc.deleted_at)
 
     @override_settings(AUDIT_LOG_ENABLED=False)
     def test_document_history_action_disabled(self) -> None:

@@ -940,6 +940,63 @@ describe('DocumentDetailComponent', () => {
     expect(modalCloseSpy).toHaveBeenCalled()
   })
 
+  it('should block delete before the configured retention date', () => {
+    initNormally()
+    component.document.delete_allowed_at = '2099-01-01'
+    fixture.detectChanges()
+    const modalSpy = jest.spyOn(modalService, 'open')
+
+    component.delete()
+
+    expect(component.canDeleteDocument()).toBe(false)
+    expect(modalSpy).not.toHaveBeenCalled()
+  })
+
+  it('should apply retention period for the current document', () => {
+    initNormally()
+    component.documentTypes = [
+      { id: 21, name: 'DocumentType21', retention_period_years: 10 },
+    ] as any
+    const updatedDoc = {
+      ...doc,
+      delete_allowed_at: '2035-01-01',
+    } as Document
+    jest
+      .spyOn(documentService, 'applyRetentionPeriod')
+      .mockReturnValue(of(updatedDoc))
+    const updateSpy = jest
+      .spyOn(component, 'updateComponent')
+      .mockImplementation(() => {})
+    const toastSpy = jest.spyOn(toastService, 'showInfo')
+
+    component.applyRetentionPeriod()
+
+    expect(documentService.applyRetentionPeriod).toHaveBeenCalledWith(
+      doc.id,
+      doc.id
+    )
+    expect(updateSpy).toHaveBeenCalledWith(updatedDoc)
+    expect(toastSpy).toHaveBeenCalledWith(
+      'Retention period written to document "Doc 3".'
+    )
+    expect(component.retentionActionRunning).toBe(false)
+  })
+
+  it('should disable editing after the retention period was written', () => {
+    initNormally()
+    const lockedDoc = {
+      ...doc,
+      delete_allowed_at: '2035-01-01',
+    } as Document
+
+    component.document = lockedDoc
+    component['prepareForm'](lockedDoc)
+
+    expect(component.userCanEdit).toBe(false)
+    expect(component.documentForm.disabled).toBe(true)
+    expect(component.documentForm.get('content')?.disabled).toBe(true)
+  })
+
   it('should allow retry delete if error', () => {
     initNormally()
     let openModal: NgbModalRef

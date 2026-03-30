@@ -715,6 +715,7 @@ class TestApiDocumentTypes(DirectoriesMixin, APITestCase):
                 {
                     "name": "Invoice",
                     "custom_fields": [custom_field_1.id, custom_field_2.id],
+                    "retention_period_years": 10,
                 },
             ),
             content_type="application/json",
@@ -725,19 +726,24 @@ class TestApiDocumentTypes(DirectoriesMixin, APITestCase):
             response.data["custom_fields"],
             [custom_field_1.id, custom_field_2.id],
         )
+        self.assertEqual(response.data["retention_period_years"], 10)
 
     def test_api_retrieve_document_type_includes_custom_fields(self) -> None:
         custom_field = CustomField.objects.create(
             name="Contract Number",
             data_type=CustomField.FieldDataType.STRING,
         )
-        document_type = DocumentType.objects.create(name="Contract")
+        document_type = DocumentType.objects.create(
+            name="Contract",
+            retention_period_years=6,
+        )
         document_type.custom_fields.add(custom_field)
 
         response = self.client.get(f"{self.ENDPOINT}{document_type.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["custom_fields"], [custom_field.id])
+        self.assertEqual(response.data["retention_period_years"], 6)
 
     def test_api_create_document_type_with_xrechnung_settings(self) -> None:
         custom_field = CustomField.objects.create(

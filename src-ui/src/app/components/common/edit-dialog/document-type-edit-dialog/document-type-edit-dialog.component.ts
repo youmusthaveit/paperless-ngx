@@ -18,6 +18,7 @@ import { UserService } from 'src/app/services/rest/user.service'
 import { SettingsService } from 'src/app/services/settings.service'
 import { ToastService } from 'src/app/services/toast.service'
 import { CheckComponent } from '../../input/check/check.component'
+import { NumberComponent } from '../../input/number/number.component'
 import { PermissionsFormComponent } from '../../input/permissions/permissions-form/permissions-form.component'
 import { SelectComponent } from '../../input/select/select.component'
 import { TextComponent } from '../../input/text/text.component'
@@ -54,6 +55,7 @@ const XRECHNUNG_CORRESPONDENT_TARGET = 'correspondent'
     CheckComponent,
     SelectComponent,
     PermissionsFormComponent,
+    NumberComponent,
     TextComponent,
     IfOwnerDirective,
     FormsModule,
@@ -115,6 +117,7 @@ export class DocumentTypeEditDialogComponent
       match: new FormControl(''),
       is_insensitive: new FormControl(true),
       custom_fields: new FormControl([]),
+      retention_period_years: new FormControl<number | null>(null),
       enable_xrechnung_import: new FormControl(false),
       xrechnung_correspondent_field: new FormControl(null),
       xrechnung_custom_field_mappings: new FormArray([]),

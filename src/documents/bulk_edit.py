@@ -10,6 +10,7 @@ from celery import chord
 from celery import group
 from celery import shared_task
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -141,15 +142,19 @@ def set_storage_path(doc_ids: list[int], storage_path: StoragePath) -> Literal["
 
 def set_document_type(doc_ids: list[int], document_type: DocumentType) -> Literal["OK"]:
     if document_type:
-        document_type = DocumentType.objects.only("pk").get(id=document_type)
+        document_type = DocumentType.objects.only("pk", "retention_period_years").get(
+            id=document_type,
+        )
 
-    qs = (
-        Document.objects.filter(Q(id__in=doc_ids) & ~Q(document_type=document_type))
-        .select_related("document_type")
-        .only("pk", "document_type__id")
+    docs = list(
+        Document.objects.filter(
+            Q(id__in=doc_ids) & ~Q(document_type=document_type),
+        ).select_related("document_type"),
     )
-    affected_docs = list(qs.values_list("pk", flat=True))
-    qs.update(document_type=document_type)
+    affected_docs = [doc.pk for doc in docs]
+    for doc in docs:
+        doc.document_type = document_type
+        doc.save()
 
     bulk_update_documents.delay(document_ids=affected_docs)
 
@@ -346,6 +351,18 @@ def delete(doc_ids: list[int]) -> Literal["OK"]:
             .distinct()
         )
         delete_ids = list({*doc_ids, *version_ids})
+
+        restricted_doc = (
+            Document.objects.filter(id__in=delete_ids)
+            .filter(
+                deleted_at__isnull=True,
+                delete_allowed_at__isnull=False,
+                delete_allowed_at__gt=timezone.localdate(),
+            )
+            .first()
+        )
+        if restricted_doc is not None:
+            raise ValidationError(restricted_doc.get_delete_restriction_message())
 
         Document.objects.filter(id__in=delete_ids).delete()
 

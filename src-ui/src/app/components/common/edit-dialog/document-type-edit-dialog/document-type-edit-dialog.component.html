@@ -23,6 +23,12 @@
         formControlName="custom_fields"
         [multiple]="true"
         [allowNull]="true"></pngx-input-select>
+      <pngx-input-number
+        i18n-title
+        title="Retention period (years)"
+        formControlName="retention_period_years"
+        [showAdd]="false"
+        [step]="1"></pngx-input-number>
       <pngx-input-check
         i18n-title
         title="Use for E-Rechnung imports"

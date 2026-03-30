@@ -75,6 +75,7 @@ describe('DocumentTypeEditDialogComponent', () => {
   })
 
   it('should include xrechnung settings in the form', () => {
+    expect(component.objectForm.get('retention_period_years')).toBeTruthy()
     expect(component.objectForm.get('enable_xrechnung_import')).toBeTruthy()
     expect(
       component.objectForm.get('xrechnung_correspondent_field')

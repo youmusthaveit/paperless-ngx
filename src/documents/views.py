@@ -26,6 +26,7 @@ from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connections
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.recorder import MigrationRecorder
@@ -997,6 +998,17 @@ class DocumentViewSet(
         content_updated = "content" in request.data
         updated_content = request.data.get("content") if content_updated else None
 
+        if root_doc.delete_allowed_at is not None:
+            raise ValidationError(
+                {
+                    "non_field_errors": [
+                        _(
+                            "Document details and content cannot be changed after the retention period has been written.",
+                        ),
+                    ],
+                },
+            )
+
         data = request.data.copy()
         serializer_partial = partial
         if content_updated and content_doc.id != root_doc.id:
@@ -1236,6 +1248,26 @@ class DocumentViewSet(
             sender=self.__class__,
             document=doc,
         )
+
+        refreshed_doc = self.get_queryset().get(pk=doc.pk)
+        return Response(self.get_serializer(refreshed_doc).data)
+
+    @extend_schema(
+        operation_id="documents_apply_retention_period",
+        description="Write the retention-based deletion date from the document type to this document.",
+        responses={200: DocumentSerializer(all_fields=True)},
+    )
+    @action(methods=["post"], detail=True)
+    def apply_retention_period(self, request, pk=None):
+        doc = self.get_object()
+        document_type = doc.document_type
+        if document_type is None or document_type.retention_period_years is None:
+            return HttpResponseBadRequest(
+                "Document type does not define a retention period.",
+            )
+
+        doc.delete_allowed_at = doc.calculate_delete_allowed_at()
+        doc.save(update_fields=["delete_allowed_at"])
 
         refreshed_doc = self.get_queryset().get(pk=doc.pk)
         return Response(self.get_serializer(refreshed_doc).data)
@@ -1858,7 +1890,10 @@ class DocumentViewSet(
 
         index.remove_document_from_index(version_doc)
         version_doc_id = version_doc.id
-        version_doc.delete()
+        try:
+            version_doc.delete()
+        except DjangoValidationError as e:
+            return HttpResponseBadRequest(str(e))
         index.add_or_update_document(root_doc)
         if settings.AUDIT_LOG_ENABLED:
             actor = (

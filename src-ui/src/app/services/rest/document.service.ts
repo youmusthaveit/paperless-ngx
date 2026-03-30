@@ -348,6 +348,19 @@ export class DocumentService extends AbstractPaperlessService<Document> {
     )
   }
 
+  applyRetentionPeriod(
+    id: number,
+    versionID: number = null
+  ): Observable<Document> {
+    return this.http.post<Document>(
+      this.getResourceUrl(id, 'apply_retention_period'),
+      {},
+      {
+        params: versionID ? { version: versionID.toString() } : {},
+      }
+    )
+  }
+
   uploadDocument(formData) {
     return this.http.post(
       this.getResourceUrl(null, 'post_document'),

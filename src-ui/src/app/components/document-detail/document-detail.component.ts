@@ -203,6 +203,7 @@ export class DocumentDetailComponent
 
   PdfRenderMode = PdfRenderMode
   eInvoiceActionRunning = false
+  retentionActionRunning = false
 
   documentsService = inject(DocumentService)
   private route = inject(ActivatedRoute)
@@ -267,6 +268,7 @@ export class DocumentDetailComponent
     title: new FormControl(''),
     content: new FormControl(''),
     created: new FormControl(),
+    delete_allowed_at: new FormControl(),
     correspondent: new FormControl(),
     document_type: new FormControl(),
     storage_path: new FormControl(),
@@ -441,6 +443,7 @@ export class DocumentDetailComponent
     docValues['owner'] = value['permissions_form']?.owner
     docValues['set_permissions'] = value['permissions_form']?.set_permissions
     delete docValues['permissions_form']
+    delete docValues['delete_allowed_at']
     return docValues
   }
 
@@ -451,6 +454,7 @@ export class DocumentDetailComponent
     } else {
       this.documentForm.enable({ emitEvent: false })
     }
+    this.documentForm.get('delete_allowed_at')?.disable({ emitEvent: false })
     if (doc.__changedFields) {
       doc.__changedFields.forEach((field) => {
         if (field === 'owner' || field === 'set_permissions') {
@@ -1089,6 +1093,40 @@ export class DocumentDetailComponent
     )
   }
 
+  canApplyRetentionPeriod(): boolean {
+    const documentType = this.getDocumentTypeById(this.document?.document_type)
+    return (
+      !!this.document?.id &&
+      !!documentType?.retention_period_years &&
+      this.permissionsService.currentUserHasObjectPermissions(
+        PermissionAction.Change,
+        this.document
+      ) &&
+      this.permissionsService.currentUserCan(
+        PermissionAction.Change,
+        PermissionType.Document
+      )
+    )
+  }
+
+  canDeleteDocument(): boolean {
+    return (
+      !this.document?.delete_allowed_at ||
+      this.document.delete_allowed_at <= new Date().toISOString().slice(0, 10)
+    )
+  }
+
+  private isRetentionWritten(doc: Document | null | undefined): boolean {
+    return !!doc?.delete_allowed_at
+  }
+
+  getDeleteRestrictionTitle(): string {
+    if (this.canDeleteDocument()) {
+      return ''
+    }
+    return $localize`Deletion is blocked until ${this.document.delete_allowed_at}.`
+  }
+
   canDownloadEInvoiceXml(): boolean {
     return (
       !!this.document?.id &&
@@ -1121,6 +1159,36 @@ export class DocumentDetailComponent
     modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
       this.confirmApplyEInvoiceMappings()
     })
+  }
+
+  applyRetentionPeriod() {
+    if (!this.document?.id || this.retentionActionRunning) {
+      return
+    }
+
+    this.retentionActionRunning = true
+    this.documentsService
+      .applyRetentionPeriod(this.document.id, this.selectedVersionId)
+      .pipe(first())
+      .subscribe({
+        next: (doc) => {
+          this.updateComponent(doc)
+          this.openDocumentService.setDirty(this.document, false)
+          this.openDocumentService.save()
+          this.toastService.showInfo(
+            $localize`Retention period written to document "${doc.title}".`
+          )
+          this.retentionActionRunning = false
+          this.error = null
+        },
+        error: (error) => {
+          this.retentionActionRunning = false
+          this.toastService.showError(
+            $localize`Error applying retention period to document "${this.document.title}".`,
+            error
+          )
+        },
+      })
   }
 
   private confirmApplyEInvoiceMappings() {
@@ -1496,6 +1564,9 @@ export class DocumentDetailComponent
   }
 
   delete() {
+    if (!this.canDeleteDocument()) {
+      return
+    }
     let modal = this.modalService.open(ConfirmDialogComponent, {
       backdrop: 'static',
     })
@@ -1807,6 +1878,7 @@ export class DocumentDetailComponent
 
   private userCanEditDoc(doc: Document): boolean {
     return (
+      !this.isRetentionWritten(doc) &&
       this.permissionsService.currentUserCan(
         PermissionAction.Change,
         PermissionType.Document

@@ -6,6 +6,7 @@ from typing import Final
 
 import pathvalidate
 from celery import states
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
@@ -181,6 +182,15 @@ class DocumentType(MatchingModel):
             "Maps XRechnung fields to custom fields during import.",
         ),
     )
+    retention_period_years = models.PositiveIntegerField(
+        _("retention period in years"),
+        blank=True,
+        null=True,
+        validators=[MinValueValidator(1)],
+        help_text=_(
+            "Optional retention period in years. Documents of this type cannot be deleted before the calculated date.",
+        ),
+    )
 
     class Meta(MatchingModel.Meta):
         verbose_name = _("document type")
@@ -304,6 +314,16 @@ class Document(SoftDeleteModel, ModelWithOwner):  # type: ignore[django-manager-
         db_index=True,
     )
 
+    delete_allowed_at = models.DateField(
+        _("delete allowed at"),
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text=_(
+            "Date from which this document may be moved to the trash.",
+        ),
+    )
+
     filename = models.FilePathField(
         _("filename"),
         max_length=MAX_STORED_FILENAME_LENGTH,
@@ -402,6 +422,9 @@ class Document(SoftDeleteModel, ModelWithOwner):  # type: ignore[django-manager-
         if self.title:
             res += f" {self.title}"
         return res
+
+    def save(self, *args, **kwargs):
+        return super().save(*args, **kwargs)
 
     def get_effective_content(self) -> str | None:
         """
@@ -647,13 +670,61 @@ class Document(SoftDeleteModel, ModelWithOwner):  # type: ignore[django-manager-
         tags_to_add = self.tags.model.objects.filter(id__in=tag_ids)
         self.tags.add(*tags_to_add)
 
+    def calculate_delete_allowed_at(self) -> datetime.date | None:
+        if (
+            self.document_type is None
+            or self.document_type.retention_period_years is None
+        ):
+            return None
+
+        base_date = self.created
+        if base_date is None and self.added is not None:
+            base_date = timezone.localtime(self.added).date()
+        if base_date is None:
+            base_date = timezone.localdate()
+
+        year_end = datetime.date(base_date.year, 12, 31)
+        return year_end + relativedelta(
+            years=self.document_type.retention_period_years,
+            days=1,
+        )
+
+    def is_delete_restricted(self) -> bool:
+        return (
+            self.deleted_at is None
+            and self.delete_allowed_at is not None
+            and timezone.localdate() < self.delete_allowed_at
+        )
+
+    def get_delete_restriction_message(self) -> str:
+        if self.delete_allowed_at is None:
+            return _("Document cannot be deleted.")
+        return _(
+            f"Document cannot be deleted before {self.delete_allowed_at.isoformat()}.",
+        )
+
     def delete(
         self,
         *args,
         **kwargs,
     ):
+        if self.is_delete_restricted():
+            raise ValidationError(self.get_delete_restriction_message())
         # If deleting a root document, move all its versions to trash as well.
         if self.root_document_id is None:
+            restricted_version = (
+                Document.objects.filter(root_document=self)
+                .filter(
+                    deleted_at__isnull=True,
+                    delete_allowed_at__isnull=False,
+                    delete_allowed_at__gt=timezone.localdate(),
+                )
+                .first()
+            )
+            if restricted_version is not None:
+                raise ValidationError(
+                    restricted_version.get_delete_restriction_message(),
+                )
             Document.objects.filter(root_document=self).delete()
         return super().delete(
             *args,
