@@ -25,18 +25,18 @@
         [allowNull]="true"></pngx-input-select>
       <pngx-input-check
         i18n-title
-        title="Use for XRechnung imports"
+        title="Use for E-Rechnung imports"
         formControlName="enable_xrechnung_import"></pngx-input-check>
       @if (objectForm.get('enable_xrechnung_import').value) {
         <pngx-input-select
           i18n-title
-          title="XRechnung correspondent field"
+          title="E-Rechnung correspondent field"
           [items]="xrechnungFieldOptions"
           formControlName="xrechnung_correspondent_field"
           [allowNull]="true"></pngx-input-select>
         <div class="mb-2">
           <div class="d-flex justify-content-between align-items-center">
-            <label class="form-label mb-0" i18n>XRechnung custom field mappings</label>
+            <label class="form-label mb-0" i18n>E-Rechnung custom field mappings</label>
             <div class="d-flex gap-2">
               @if (object?.id) {
                 <button
@@ -57,17 +57,17 @@
                 <div class="col-5">
                   <pngx-input-select
                     i18n-title
-                    title="Custom field"
-                    [items]="customFields"
-                    formControlName="custom_field"
+                    title="E-Rechnung field"
+                    [items]="xrechnungFieldOptions"
+                    formControlName="source"
                     [allowNull]="true"></pngx-input-select>
                 </div>
                 <div class="col-5">
                   <pngx-input-select
                     i18n-title
-                    title="XRechnung field"
-                    [items]="xrechnungFieldOptions"
-                    formControlName="source"
+                    title="Custom field"
+                    [items]="customFields"
+                    formControlName="custom_field"
                     [allowNull]="true"></pngx-input-select>
                 </div>
                 <div class="col-2 d-flex align-items-end">

@@ -36,6 +36,7 @@ import { Correspondent } from 'src/app/data/correspondent'
 import { CustomFieldDataType } from 'src/app/data/custom-field'
 import { DataType } from 'src/app/data/datatype'
 import { Document } from 'src/app/data/document'
+import { DocumentMetadata } from 'src/app/data/document-metadata'
 import { DocumentType } from 'src/app/data/document-type'
 import {
   FILTER_CORRESPONDENT,
@@ -79,6 +80,7 @@ import { DocumentDetailComponent } from './document-detail.component'
 const doc: Document = {
   id: 3,
   title: 'Doc 3',
+  mime_type: 'application/pdf',
   correspondent: 11,
   document_type: 21,
   storage_path: 31,
@@ -127,6 +129,28 @@ const customFields = [
     created: new Date(),
   },
 ]
+
+const eInvoiceMetadata: DocumentMetadata = {
+  original_metadata: [
+    {
+      namespace: 'urn:paperless:xrechnung',
+      prefix: 'xrechnung',
+      key: 'invoice_number',
+      value: 'INV-1',
+    },
+  ],
+}
+
+const nonEInvoiceMetadata: DocumentMetadata = {
+  original_metadata: [
+    {
+      namespace: 'http://ns.adobe.com/pdf/1.3/',
+      prefix: 'pdf',
+      key: 'Producer',
+      value: 'pikepdf',
+    },
+  ],
+}
 
 describe('DocumentDetailComponent', () => {
   let component: DocumentDetailComponent
@@ -1252,6 +1276,111 @@ describe('DocumentDetailComponent', () => {
     const toastSpy = jest.spyOn(toastService, 'showError')
     initNormally()
     expect(toastSpy).toHaveBeenCalledWith('Error retrieving metadata', error)
+  })
+
+  it('should apply e-invoice mappings for the current document', () => {
+    jest
+      .spyOn(documentService, 'getMetadata')
+      .mockReturnValue(of(eInvoiceMetadata))
+    initNormally()
+    const updatedDoc = {
+      ...doc,
+      correspondent: 12,
+    } as Document
+    jest
+      .spyOn(documentService, 'applyEInvoiceMappings')
+      .mockReturnValue(of(updatedDoc))
+    const updateSpy = jest
+      .spyOn(component, 'updateComponent')
+      .mockImplementation(() => {})
+    const toastSpy = jest.spyOn(toastService, 'showInfo')
+    const modalSpy = jest.spyOn(modalService, 'open')
+
+    component.applyEInvoiceMappings()
+
+    expect(modalSpy).toHaveBeenCalledWith(ConfirmDialogComponent, {
+      backdrop: 'static',
+    })
+    const confirmDialog = modalSpy.mock.results[0].value
+      .componentInstance as ConfirmDialogComponent
+    expect(confirmDialog.title).toBe('Apply E-Rechnung mappings')
+    expect(confirmDialog.messageBold).toContain(
+      'Existing correspondent and custom field values may be overwritten.'
+    )
+    confirmDialog.confirmClicked.emit()
+
+    expect(documentService.applyEInvoiceMappings).toHaveBeenCalledWith(
+      doc.id,
+      doc.id
+    )
+    expect(updateSpy).toHaveBeenCalledWith(updatedDoc)
+    expect(toastSpy).toHaveBeenCalledWith(
+      'E-Rechnung mappings applied to document "Doc 3".'
+    )
+    expect(component.eInvoiceActionRunning).toBe(false)
+  })
+
+  it('should show apply e-invoice mappings only for e-invoice metadata in actions', () => {
+    jest
+      .spyOn(documentService, 'getMetadata')
+      .mockReturnValue(of(eInvoiceMetadata))
+    initNormally()
+
+    const actionsMenu = fixture.debugElement.query(
+      By.css('[aria-labelledby="actionsDropdown"]')
+    )
+    expect(actionsMenu.nativeElement.textContent).toContain(
+      'Apply E-Rechnung mappings'
+    )
+    expect(component.canApplyEInvoiceMappings()).toBe(true)
+  })
+
+  it('should hide apply e-invoice mappings for non e-invoice documents', () => {
+    jest
+      .spyOn(documentService, 'getMetadata')
+      .mockReturnValue(of(nonEInvoiceMetadata))
+    initNormally()
+
+    const actionsMenu = fixture.debugElement.query(
+      By.css('[aria-labelledby="actionsDropdown"]')
+    )
+    expect(actionsMenu.nativeElement.textContent).not.toContain(
+      'Apply E-Rechnung mappings'
+    )
+    expect(component.canApplyEInvoiceMappings()).toBe(false)
+  })
+
+  it('should show download e-invoice xml only for pdf e-invoices', () => {
+    jest
+      .spyOn(documentService, 'getMetadata')
+      .mockReturnValue(of(eInvoiceMetadata))
+    initNormally()
+
+    const downloadMenu = fixture.debugElement
+      .queryAll(By.css('.dropdown-menu.shadow'))
+      .find((menu) =>
+        menu.nativeElement.textContent.includes('Use formatted filename')
+      )
+    expect(downloadMenu).toBeTruthy()
+    expect(downloadMenu.nativeElement.textContent).toContain(
+      'XML herunterladen'
+    )
+    expect(component.canDownloadEInvoiceXml()).toBe(true)
+  })
+
+  it('should download embedded e-invoice xml for zugferd pdfs', () => {
+    jest
+      .spyOn(documentService, 'getMetadata')
+      .mockReturnValue(of(eInvoiceMetadata))
+    initNormally()
+
+    component.downloadEInvoiceXml()
+
+    httpTestingController
+      .expectOne(
+        `${environment.apiBaseUrl}documents/${doc.id}/download_einvoice_xml/`
+      )
+      .flush(new ArrayBuffer(100))
   })
 
   it('should display custom fields', () => {

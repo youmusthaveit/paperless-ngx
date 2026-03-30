@@ -48,6 +48,8 @@ from documents.models import WorkflowTrigger
 from documents.signals.handlers import run_workflows
 from documents.tests.utils import DirectoriesMixin
 from documents.tests.utils import DocumentConsumeDelayMixin
+from paperless.parsers.xrechnung import InvoiceData
+from paperless.parsers.xrechnung import InvoiceParty
 
 
 class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
@@ -177,7 +179,11 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         results = response.data["results"]
         self.assertEqual(len(results[0]), 0)
 
-    def test_patch_document_type_transfers_xrechnung_fields(self) -> None:
+    @mock.patch("documents.serialisers.parse_xrechnung_invoice")
+    def test_patch_document_type_transfers_xrechnung_fields(
+        self,
+        mock_parse_xrechnung_invoice,
+    ) -> None:
         custom_field = CustomField.objects.create(
             name="Invoice Number",
             data_type=CustomField.FieldDataType.STRING,
@@ -192,18 +198,31 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
                 },
             ],
         )
-        sample_file = (
-            Path(__file__).resolve().parents[3]
-            / "resources"
-            / "beispiel-xrechnung-cii.xml"
-        )
         doc = Document.objects.create(
             title="xrechnung",
             content="content",
             checksum="123",
             mime_type="application/xml",
         )
-        doc.source_write_bytes(sample_file.read_bytes())
+        doc.source_write_bytes(b"<invoice />")
+        mock_parse_xrechnung_invoice.return_value = InvoiceData(
+            profile="xrechnung",
+            invoice_number="1122334455",
+            invoice_type_code=None,
+            issue_date=None,
+            due_amount=None,
+            grand_total=None,
+            tax_total=None,
+            currency="EUR",
+            buyer_reference=None,
+            payment_reference=None,
+            payment_terms=None,
+            seller=InvoiceParty(name="TÜV Rheinland GmbH"),
+            buyer=InvoiceParty(),
+            notes=[],
+            lines=[],
+            raw_text="",
+        )
 
         response = self.client.patch(
             f"/api/documents/{doc.pk}/",
@@ -219,6 +238,89 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         self.assertEqual(doc.document_type, document_type)
         self.assertEqual(doc.correspondent.name, "TÜV Rheinland GmbH")
         self.assertEqual(doc.custom_fields.get(field=custom_field).value, "1122334455")
+
+    @mock.patch("documents.serialisers.parse_xrechnung_invoice")
+    def test_apply_einvoice_mappings_to_existing_document(
+        self,
+        mock_parse_xrechnung_invoice,
+    ):
+        custom_field = CustomField.objects.create(
+            name="Invoice Number",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(
+            name="E-Rechnung",
+            xrechnung_correspondent_field="seller_name",
+            xrechnung_custom_field_mappings=[
+                {
+                    "custom_field": custom_field.pk,
+                    "source": "invoice_number",
+                },
+            ],
+        )
+        doc = Document.objects.create(
+            title="e-rechnung",
+            content="content",
+            checksum="123-apply",
+            mime_type="application/xml",
+            document_type=document_type,
+        )
+        doc.source_write_bytes(b"<invoice />")
+        CustomFieldInstance.objects.create(
+            document=doc,
+            field=custom_field,
+            value_text="old-value",
+        )
+        mock_parse_xrechnung_invoice.return_value = InvoiceData(
+            profile="xrechnung",
+            invoice_number="NEW-123",
+            invoice_type_code=None,
+            issue_date=None,
+            due_amount=None,
+            grand_total=None,
+            tax_total=None,
+            currency="EUR",
+            buyer_reference=None,
+            payment_reference=None,
+            payment_terms=None,
+            seller=InvoiceParty(name="ACME GmbH"),
+            buyer=InvoiceParty(),
+            notes=[],
+            lines=[],
+            raw_text="",
+        )
+
+        response = self.client.post(
+            f"/api/documents/{doc.pk}/apply_einvoice_mappings/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+
+        self.assertEqual(doc.correspondent.name, "ACME GmbH")
+        self.assertEqual(doc.custom_fields.get(field=custom_field).value, "NEW-123")
+
+    def test_download_einvoice_xml_from_zugferd_pdf(self) -> None:
+        doc = Document.objects.create(
+            title="zugferd",
+            filename="zugferd.pdf",
+            mime_type="application/pdf",
+        )
+        sample_pdf = (
+            Path(settings.BASE_DIR).parent
+            / "resources"
+            / "orgaMAX_Beispielrechnung_ZUGFeRD.pdf"
+        )
+        doc.source_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(sample_pdf, doc.source_path)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/download_einvoice_xml/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/xml")
+        self.assertIn("factur-x.xml", response["Content-Disposition"])
+        self.assertIn(b"CrossIndustryInvoice", response.content)
 
     def test_document_fields_respects_created(self) -> None:
         Document.objects.create(

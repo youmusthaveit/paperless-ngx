@@ -132,12 +132,14 @@ export class DocumentTypeEditDialogComponent
     this.documentTypeService.applyXRechnungMappings(this.object.id).subscribe({
       next: (result) => {
         this.xrechnungActionRunning = false
-        this.toastService.showInfo(result.detail)
+        this.toastService.showInfo(
+          $localize`Applied E-Rechnung mappings to ${result.updated_documents}:count: document(s).`
+        )
       },
       error: (error) => {
         this.xrechnungActionRunning = false
         this.toastService.showError(
-          $localize`Error while applying XRechnung mappings.`,
+          $localize`Error while applying E-Rechnung mappings.`,
           error
         )
       },

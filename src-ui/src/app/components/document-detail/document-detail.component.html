@@ -47,6 +47,12 @@
     <div class="btn-group" ngbDropdown role="group">
       <button class="btn btn-sm btn-outline-primary dropdown-toggle" [disabled]="downloading" ngbDropdownToggle></button>
       <div class="dropdown-menu shadow" ngbDropdownMenu>
+        @if (canDownloadEInvoiceXml()) {
+          <button ngbDropdownItem (click)="downloadEInvoiceXml()" [disabled]="downloading" i18n>
+            XML herunterladen
+          </button>
+          <div class="dropdown-divider"></div>
+        }
         @if (metadata?.has_archive_version) {
           <button ngbDropdownItem (click)="download(true)" [disabled]="downloading" i18n>Download original</button>
           <div class="dropdown-divider"></div>
@@ -69,6 +75,12 @@
       <button ngbDropdownItem (click)="reprocess()" [disabled]="!userCanEdit || !userIsOwner">
         <i-bs width="1em" height="1em" name="arrow-counterclockwise" class="me-1"></i-bs><span i18n>Reprocess</span>
       </button>
+
+      @if (canApplyEInvoiceMappings()) {
+        <button ngbDropdownItem (click)="applyEInvoiceMappings()" [disabled]="eInvoiceActionRunning || networkActive">
+          <i-bs width="1em" height="1em" name="arrow-repeat" class="me-1"></i-bs><span i18n>Apply E-Rechnung mappings</span>
+        </button>
+      }
 
       <button ngbDropdownItem (click)="printDocument()" [hidden]="useNativePdfViewer || isMobile">
         <i-bs width="1em" height="1em" name="printer" class="me-1"></i-bs><span i18n>Print</span>

@@ -27,6 +27,7 @@ class TestXRechnungParserRegistryInterface:
         assert mime_types == {
             "application/xml": ".xml",
             "text/xml": ".xml",
+            "application/pdf": ".pdf",
         }
 
     def test_score_returns_high_score_for_xrechnung(
@@ -59,6 +60,28 @@ class TestXRechnungParserRegistryInterface:
             "application/xml",
             sample_xrechnung_cii_file.name,
             sample_xrechnung_cii_file,
+        )
+        assert parser_cls is XRechnungDocumentParser
+
+    def test_score_returns_high_score_for_zugferd_pdf(
+        self,
+        sample_zugferd_pdf_file: Path,
+    ) -> None:
+        score = XRechnungDocumentParser.score(
+            "application/pdf",
+            sample_zugferd_pdf_file.name,
+            sample_zugferd_pdf_file,
+        )
+        assert score == 30
+
+    def test_parser_registry_selects_xrechnung_parser_for_zugferd_pdf(
+        self,
+        sample_zugferd_pdf_file: Path,
+    ) -> None:
+        parser_cls = get_parser_registry().get_parser_for_file(
+            "application/pdf",
+            sample_zugferd_pdf_file.name,
+            sample_zugferd_pdf_file,
         )
         assert parser_cls is XRechnungDocumentParser
 
@@ -128,6 +151,50 @@ class TestXRechnungParser:
 
         assert any(entry["key"] == "invoice_number" for entry in metadata)
         assert any(entry["key"] == "seller_name" for entry in metadata)
+
+    def test_parse_zugferd_pdf(
+        self,
+        xrechnung_parser: XRechnungDocumentParser,
+        sample_zugferd_pdf_file: Path,
+    ) -> None:
+        xrechnung_parser.configure(ParserContext())
+        xrechnung_parser.parse(sample_zugferd_pdf_file, "application/pdf")
+
+        text = xrechnung_parser.get_text()
+        assert text is not None
+        assert "XRechnung" in text
+        assert "000073" in text
+        assert "achtmacher KOMMUNIKATION" in text
+        assert "Klavierklang GmbH" in text
+
+        assert xrechnung_parser.get_archive_path() == sample_zugferd_pdf_file
+        assert (
+            xrechnung_parser.get_page_count(
+                sample_zugferd_pdf_file,
+                "application/pdf",
+            )
+            == 1
+        )
+
+    def test_extract_metadata_from_zugferd_pdf(
+        self,
+        xrechnung_parser: XRechnungDocumentParser,
+        sample_zugferd_pdf_file: Path,
+    ) -> None:
+        metadata = xrechnung_parser.extract_metadata(
+            sample_zugferd_pdf_file,
+            "application/pdf",
+        )
+
+        assert any(
+            entry["key"] == "invoice_number" and entry["value"] == "000073"
+            for entry in metadata
+        )
+        assert any(
+            entry["key"] == "seller_name"
+            and entry["value"] == "achtmacher KOMMUNIKATION"
+            for entry in metadata
+        )
 
     def test_get_page_count_uses_generated_pdf(
         self,

@@ -249,6 +249,19 @@ def sample_xrechnung_cii_file() -> Path:
     ).resolve()
 
 
+@pytest.fixture(scope="session")
+def sample_zugferd_pdf_file() -> Path:
+    """Path to the checked-in ZUGFeRD/Factur-X PDF sample document."""
+
+    from pathlib import Path as LocalPath
+
+    return (
+        LocalPath(__file__).resolve().parents[4]
+        / "resources"
+        / "orgaMAX_Beispielrechnung_ZUGFeRD.pdf"
+    ).resolve()
+
+
 @pytest.fixture()
 def xrechnung_parser() -> Generator[XRechnungDocumentParser, None, None]:
     """Yield an XRechnungDocumentParser and clean up after the test."""

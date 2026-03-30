@@ -38,7 +38,10 @@ import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
 import { CustomFieldInstance } from 'src/app/data/custom-field-instance'
 import { DataType } from 'src/app/data/datatype'
 import { Document, DocumentVersionInfo } from 'src/app/data/document'
-import { DocumentMetadata } from 'src/app/data/document-metadata'
+import {
+  DocumentMetadata,
+  DocumentMetadataEntry,
+} from 'src/app/data/document-metadata'
 import { DocumentNote } from 'src/app/data/document-note'
 import { DocumentSuggestions } from 'src/app/data/document-suggestions'
 import { DocumentType } from 'src/app/data/document-type'
@@ -195,7 +198,11 @@ export class DocumentDetailComponent
   extends ComponentWithPermissions
   implements OnInit, OnDestroy, DirtyComponent
 {
+  private static readonly E_INVOICE_METADATA_NAMESPACE =
+    'urn:paperless:xrechnung'
+
   PdfRenderMode = PdfRenderMode
+  eInvoiceActionRunning = false
 
   documentsService = inject(DocumentService)
   private route = inject(ActivatedRoute)
@@ -1066,6 +1073,82 @@ export class DocumentDetailComponent
       })
   }
 
+  canApplyEInvoiceMappings(): boolean {
+    return (
+      !!this.document?.id &&
+      !!this.document?.document_type &&
+      this.hasEInvoiceMetadata() &&
+      this.permissionsService.currentUserHasObjectPermissions(
+        PermissionAction.Change,
+        this.document
+      ) &&
+      this.permissionsService.currentUserCan(
+        PermissionAction.Change,
+        PermissionType.Document
+      )
+    )
+  }
+
+  canDownloadEInvoiceXml(): boolean {
+    return (
+      !!this.document?.id &&
+      this.document?.mime_type === 'application/pdf' &&
+      this.hasEInvoiceMetadata()
+    )
+  }
+
+  private hasEInvoiceMetadata(): boolean {
+    return (this.metadata?.original_metadata ?? []).some(
+      (entry: DocumentMetadataEntry) =>
+        entry?.namespace ===
+          DocumentDetailComponent.E_INVOICE_METADATA_NAMESPACE &&
+        entry?.prefix === 'xrechnung'
+    )
+  }
+
+  applyEInvoiceMappings() {
+    if (!this.document?.id || this.eInvoiceActionRunning) {
+      return
+    }
+
+    const modal = this.modalService.open(ConfirmDialogComponent, {
+      backdrop: 'static',
+    })
+    modal.componentInstance.title = $localize`Apply E-Rechnung mappings`
+    modal.componentInstance.messageBold = $localize`Existing correspondent and custom field values may be overwritten.`
+    modal.componentInstance.message = $localize`Do you want to reapply the E-Rechnung mappings for this document now?`
+    modal.componentInstance.btnCaption = $localize`Apply`
+    modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
+      this.confirmApplyEInvoiceMappings()
+    })
+  }
+
+  private confirmApplyEInvoiceMappings() {
+    this.eInvoiceActionRunning = true
+    this.documentsService
+      .applyEInvoiceMappings(this.document.id, this.selectedVersionId)
+      .pipe(first())
+      .subscribe({
+        next: (doc) => {
+          this.updateComponent(doc)
+          this.openDocumentService.setDirty(this.document, false)
+          this.openDocumentService.save()
+          this.toastService.showInfo(
+            $localize`E-Rechnung mappings applied to document "${doc.title}".`
+          )
+          this.eInvoiceActionRunning = false
+          this.error = null
+        },
+        error: (error) => {
+          this.eInvoiceActionRunning = false
+          this.toastService.showError(
+            $localize`Error applying E-Rechnung mappings to document "${this.document.title}".`,
+            error
+          )
+        },
+      })
+  }
+
   getSuggestions() {
     this.suggestionsLoading = true
     this.documentsService
@@ -1500,14 +1583,29 @@ export class DocumentDetailComponent
   }
 
   download(original: boolean = false) {
-    this.downloading = true
-    const selectedVersionId = this.getSelectedNonLatestVersionId()
-    const downloadUrl = this.documentsService.getDownloadUrl(
-      this.documentId,
-      original,
-      selectedVersionId,
-      this.useFormattedFilename
+    this.downloadFromUrl(
+      this.documentsService.getDownloadUrl(
+        this.documentId,
+        original,
+        this.getSelectedNonLatestVersionId(),
+        this.useFormattedFilename
+      ),
+      $localize`Error downloading document`
     )
+  }
+
+  downloadEInvoiceXml() {
+    this.downloadFromUrl(
+      this.documentsService.getEInvoiceXmlDownloadUrl(
+        this.documentId,
+        this.getSelectedNonLatestVersionId()
+      ),
+      $localize`Error downloading E-Rechnung XML`
+    )
+  }
+
+  private downloadFromUrl(downloadUrl: string, errorMessage: string) {
+    this.downloading = true
     this.http
       .get(downloadUrl, { observe: 'response', responseType: 'blob' })
       .subscribe({
@@ -1542,10 +1640,7 @@ export class DocumentDetailComponent
         },
         error: (error) => {
           this.downloading = false
-          this.toastService.showError(
-            $localize`Error downloading document`,
-            error
-          )
+          this.toastService.showError(errorMessage, error)
         },
       })
   }

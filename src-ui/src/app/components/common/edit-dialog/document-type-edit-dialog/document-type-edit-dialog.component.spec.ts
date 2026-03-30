@@ -92,7 +92,7 @@ describe('DocumentTypeEditDialogComponent', () => {
   it('should apply xrechnung mappings for an existing document type', () => {
     component.object = {
       id: 12,
-      name: 'XRechnung',
+      name: 'E-Rechnung',
       permissions: {},
     } as any
     component.dialogMode = EditDialogMode.EDIT
@@ -100,7 +100,7 @@ describe('DocumentTypeEditDialogComponent', () => {
 
     jest.spyOn(documentTypeService, 'applyXRechnungMappings').mockReturnValue(
       of({
-        detail: 'Applied XRechnung mappings to 1 document(s).',
+        detail: 'Applied E-Rechnung mappings to 1 document(s).',
         updated_documents: 1,
       })
     )
@@ -109,7 +109,7 @@ describe('DocumentTypeEditDialogComponent', () => {
     component.applyXRechnungMappings()
 
     expect(toastSpy).toHaveBeenCalledWith(
-      'Applied XRechnung mappings to 1 document(s).'
+      'Applied E-Rechnung mappings to 1 document(s).'
     )
     expect(component.xrechnungActionRunning).toBe(false)
   })
@@ -117,7 +117,7 @@ describe('DocumentTypeEditDialogComponent', () => {
   it('should show an error toast when applying xrechnung mappings fails', () => {
     component.object = {
       id: 12,
-      name: 'XRechnung',
+      name: 'E-Rechnung',
       permissions: {},
     } as any
     component.dialogMode = EditDialogMode.EDIT

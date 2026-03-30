@@ -158,6 +158,7 @@ from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
 from documents.models import WorkflowTrigger
+from documents.parsers import ParseError
 from documents.permissions import AcknowledgeTasksPermissions
 from documents.permissions import PaperlessAdminPermissions
 from documents.permissions import PaperlessNotePermissions
@@ -226,6 +227,7 @@ from paperless.config import AIConfig
 from paperless.config import GeneralConfig
 from paperless.models import ApplicationConfiguration
 from paperless.parsers.registry import get_parser_registry
+from paperless.parsers.xrechnung import extract_embedded_einvoice_xml
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import UserSerializer
 from paperless.views import StandardPagination
@@ -1213,6 +1215,31 @@ class DocumentViewSet(
 
         return Response(meta)
 
+    @extend_schema(
+        operation_id="documents_apply_einvoice_mappings",
+        description="Reapply E-Rechnung mappings to this document.",
+        responses={200: DocumentSerializer(all_fields=True)},
+    )
+    @action(methods=["post"], detail=True)
+    def apply_einvoice_mappings(self, request, pk=None):
+        doc = self.get_object()
+        serializer = DocumentSerializer(context={"request": request})
+        serializer._apply_xrechnung_field_transfer(
+            doc,
+            overwrite_correspondent=True,
+            overwrite_custom_fields=True,
+        )
+        from documents import index
+
+        index.add_or_update_document(doc)
+        document_updated.send(
+            sender=self.__class__,
+            document=doc,
+        )
+
+        refreshed_doc = self.get_queryset().get(pk=doc.pk)
+        return Response(self.get_serializer(refreshed_doc).data)
+
     @action(methods=["get"], detail=True, filter_backends=[])
     @method_decorator(cache_control(no_cache=True))
     @method_decorator(
@@ -1377,6 +1404,38 @@ class DocumentViewSet(
             return self.file_response(pk, request, "attachment")
         except (FileNotFoundError, Document.DoesNotExist):
             raise Http404
+
+    @extend_schema(
+        operation_id="documents_download_einvoice_xml",
+        responses={(200, "application/xml"): OpenApiTypes.BINARY},
+    )
+    @action(methods=["get"], detail=True, filter_backends=[])
+    def download_einvoice_xml(self, request, pk=None):
+        resolved = self._resolve_request_and_root_doc(
+            pk,
+            request,
+            include_deleted=True,
+        )
+        if isinstance(resolved, HttpResponseForbidden):
+            return resolved
+
+        request_doc, root_doc = resolved
+        file_doc = self._get_effective_file_doc(request_doc, root_doc, request)
+        if file_doc.mime_type != "application/pdf":
+            raise Http404
+
+        try:
+            with file_doc.local_source_path() as source_path:
+                filename, xml_bytes = extract_embedded_einvoice_xml(source_path)
+        except (FileNotFoundError, ParseError):
+            raise Http404
+
+        response = HttpResponse(xml_bytes, content_type="application/xml")
+        filename_encoded = quote(filename)
+        response["Content-Disposition"] = (
+            f"attachment; filename=\"{filename}\"; filename*=utf-8''{filename_encoded}"
+        )
+        return response
 
     @action(
         methods=["get", "post", "delete"],

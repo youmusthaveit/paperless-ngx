@@ -270,6 +270,14 @@ export class DocumentService extends AbstractPaperlessService<Document> {
     return url.toString()
   }
 
+  getEInvoiceXmlDownloadUrl(id: number, versionID: number = null): string {
+    let url = new URL(this.getResourceUrl(id, 'download_einvoice_xml'))
+    if (versionID) {
+      url.searchParams.append('version', versionID.toString())
+    }
+    return url.toString()
+  }
+
   uploadVersion(documentId: number, file: File, versionLabel?: string) {
     const formData = new FormData()
     formData.append('document', file, file.name)
@@ -325,6 +333,19 @@ export class DocumentService extends AbstractPaperlessService<Document> {
     return this.http.patch<Document>(this.getResourceUrl(o.id), o, {
       params: versionID ? { version: versionID.toString() } : {},
     })
+  }
+
+  applyEInvoiceMappings(
+    id: number,
+    versionID: number = null
+  ): Observable<Document> {
+    return this.http.post<Document>(
+      this.getResourceUrl(id, 'apply_einvoice_mappings'),
+      {},
+      {
+        params: versionID ? { version: versionID.toString() } : {},
+      }
+    )
   }
 
   uploadDocument(formData) {

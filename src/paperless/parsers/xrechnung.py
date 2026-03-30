@@ -47,6 +47,7 @@ logger = logging.getLogger("paperless.parsing.xrechnung")
 _SUPPORTED_MIME_TYPES: dict[str, str] = {
     "application/xml": ".xml",
     "text/xml": ".xml",
+    "application/pdf": ".pdf",
 }
 
 XRECHNUNG_SOURCE_FIELDS: tuple[str, ...] = (
@@ -271,20 +272,54 @@ def _parse_cii_invoice(root: ET.Element) -> InvoiceData:
     )
 
 
-def _parse_invoice(document_path: Path) -> InvoiceData:
+def _parse_invoice_root(document_path: Path, mime_type: str) -> ET.Element:
+    if mime_type == "application/pdf":
+        _, xml_bytes = extract_embedded_einvoice_xml(document_path)
+        try:
+            return ET.fromstring(xml_bytes)
+        except ET.ParseError as err:
+            raise ParseError(f"Invalid XML document: {err}") from err
+
     try:
         root = ET.parse(document_path).getroot()
     except ET.ParseError as err:
         raise ParseError(f"Invalid XML document: {err}") from err
 
+    return root
+
+
+def extract_embedded_einvoice_xml(document_path: Path) -> tuple[str, bytes]:
+    try:
+        import pikepdf
+    except ImportError as err:
+        raise ParseError(
+            "PDF E-Rechnung support requires pikepdf to be installed.",
+        ) from err
+
+    try:
+        with pikepdf.open(document_path) as pdf:
+            for attachment in pdf.attachments.values():
+                filename = attachment.filename or "invoice.xml"
+                if not filename.lower().endswith(".xml"):
+                    continue
+                return filename, attachment.get_file().read_bytes()
+    except pikepdf.PdfError as err:
+        raise ParseError(f"Invalid PDF document: {err}") from err
+
+    raise ParseError("PDF document does not contain a supported embedded XML invoice.")
+
+
+def _parse_invoice(document_path: Path, mime_type: str) -> InvoiceData:
+    root = _parse_invoice_root(document_path, mime_type)
+
     if not _looks_like_xrechnung(root):
-        raise ParseError("XML document is not a supported XRechnung invoice.")
+        raise ParseError("Document is not a supported XRechnung or E-Rechnung invoice.")
 
     return _parse_cii_invoice(root)
 
 
 def parse_xrechnung_invoice(document_path: Path) -> InvoiceData:
-    return _parse_invoice(document_path)
+    return _parse_invoice(document_path, "application/xml")
 
 
 def get_xrechnung_source_value(
@@ -339,8 +374,8 @@ class XRechnungDocumentParser:
             return None
 
         try:
-            root = ET.parse(path).getroot()
-        except ET.ParseError:
+            root = _parse_invoice_root(path, mime_type)
+        except ParseError:
             return None
 
         return 30 if _looks_like_xrechnung(root) else None
@@ -385,7 +420,7 @@ class XRechnungDocumentParser:
         *,
         produce_archive: bool = True,
     ) -> None:
-        self._invoice = _parse_invoice(document_path)
+        self._invoice = _parse_invoice(document_path, mime_type)
         self._text = self._render_search_text(self._invoice)
 
         if self._invoice.issue_date is not None:
@@ -393,7 +428,10 @@ class XRechnungDocumentParser:
                 datetime.combine(self._invoice.issue_date, time.min),
             )
 
-        self._archive_path = self._generate_pdf(self._invoice)
+        if mime_type == "application/pdf":
+            self._archive_path = document_path
+        else:
+            self._archive_path = self._generate_pdf(self._invoice)
 
     def get_text(self) -> str | None:
         return self._text
@@ -428,11 +466,8 @@ class XRechnungDocumentParser:
         document_path: Path,
         mime_type: str,
     ) -> list[MetadataEntry]:
-        if mime_type == "application/pdf":
-            return []
-
         try:
-            invoice = _parse_invoice(document_path)
+            invoice = _parse_invoice(document_path, mime_type)
         except ParseError as err:
             logger.warning(
                 "Error while extracting XRechnung metadata for %s: %s",
