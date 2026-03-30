@@ -127,6 +127,14 @@ describe('SelectComponent', () => {
     expect(emitSpy).toHaveBeenCalledWith([items[2]])
   })
 
+  it('should emit empty filter selection when cleared', () => {
+    component.value = null
+    component.items = items
+    const emitSpy = jest.spyOn(component.filterDocuments, 'emit')
+    component.onFilterDocuments()
+    expect(emitSpy).toHaveBeenCalledWith([])
+  })
+
   it('should return the correct filter button title', () => {
     component.title = 'Tag'
     const expectedTitle = `Filter documents with this ${component.title}`

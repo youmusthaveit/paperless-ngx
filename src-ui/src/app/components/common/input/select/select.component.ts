@@ -165,7 +165,13 @@ export class SelectComponent extends AbstractInputComponent<number> {
   }
 
   onFilterDocuments() {
-    this.filterDocuments.emit([this.items.find((i) => i.id === this.value)])
+    if (this.value == null) {
+      this.filterDocuments.emit([])
+      return
+    }
+
+    const item = this.items?.find((i) => i.id === this.value)
+    this.filterDocuments.emit(item ? [item] : [])
   }
 
   get filterButtonTitle() {

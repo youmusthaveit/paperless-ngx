@@ -124,4 +124,12 @@ describe('DateComponent', () => {
     component.onFilterDocuments()
     expect(dateReceived).toEqual([{ day: 16, month: 12, year: 2023 }])
   })
+
+  it('should emit empty filter selection when date is cleared', () => {
+    let dateReceived
+    component.value = ''
+    component.filterDocuments.subscribe((date) => (dateReceived = date))
+    component.onFilterDocuments()
+    expect(dateReceived).toEqual([])
+  })
 })

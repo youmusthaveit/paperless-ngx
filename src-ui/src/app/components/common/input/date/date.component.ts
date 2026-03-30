@@ -113,7 +113,13 @@ export class DateComponent
   }
 
   onFilterDocuments() {
-    this.filterDocuments.emit([this.ngbDateParserFormatter.parse(this.value)])
+    if (!this.value) {
+      this.filterDocuments.emit([])
+      return
+    }
+
+    const parsedDate = this.ngbDateParserFormatter.parse(this.value)
+    this.filterDocuments.emit(parsedDate ? [parsedDate] : [])
   }
 
   get filterButtonTitle() {

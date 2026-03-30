@@ -203,6 +203,16 @@ describe('DocumentListComponent', () => {
     expect(setFilterRulesSpy).toHaveBeenCalledWith(rules, true)
   })
 
+  it('should apply reset filter rules emitted by the filter editor', () => {
+    fixture.detectChanges()
+    const setFilterRulesSpy = jest.spyOn(documentListService, 'setFilterRules')
+    const rules = [{ rule_type: FILTER_HAS_TAGS_ANY, value: '10' }]
+
+    component['filterEditor'].resetFilterRules.next(rules)
+
+    expect(setFilterRulesSpy).toHaveBeenCalledWith(rules, true)
+  })
+
   it('should load saved view from URL', () => {
     const view: SavedView = {
       id: 10,
