@@ -2415,9 +2415,12 @@ class PostDocumentSerializer(serializers.Serializer):
     def validate_document(self, document):
         document_data = document.file.read()
         mime_type = magic.from_buffer(document_data, mime=True)
+        is_eml_upload = document.name.lower().endswith(".eml")
 
         if not is_mime_type_supported(mime_type):
-            if (
+            if is_eml_upload:
+                return document.name, document_data
+            elif (
                 mime_type in settings.CONSUMER_PDF_RECOVERABLE_MIME_TYPES
                 and document.name.endswith(
                     ".pdf",

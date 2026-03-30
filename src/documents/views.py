@@ -7,7 +7,11 @@ import tempfile
 import zipfile
 from collections import defaultdict
 from collections import deque
+from datetime import date
 from datetime import datetime
+from email import policy as email_policy
+from email.parser import BytesParser
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from time import mktime
 from typing import TYPE_CHECKING
@@ -160,6 +164,7 @@ from documents.models import Workflow
 from documents.models import WorkflowAction
 from documents.models import WorkflowTrigger
 from documents.parsers import ParseError
+from documents.parsers import is_mime_type_supported
 from documents.permissions import AcknowledgeTasksPermissions
 from documents.permissions import PaperlessAdminPermissions
 from documents.permissions import PaperlessNotePermissions
@@ -2723,6 +2728,130 @@ class PostDocumentView(GenericAPIView):
     serializer_class = PostDocumentSerializer
     parser_classes = (parsers.MultiPartParser,)
 
+    def _build_upload_attachment_overrides(
+        self,
+        *,
+        attachment_name: str,
+        attachment_count: int,
+        title: str | None,
+        email_created: date | None,
+        created: date | None,
+        correspondent_id: int | None,
+        document_type_id: int | None,
+        storage_path_id: int | None,
+        tag_ids: list[int] | None,
+        archive_serial_number: int | None,
+        custom_fields: dict[int, Any] | None,
+        owner_id: int,
+    ) -> DocumentMetadataOverrides:
+        sanitized_filename = pathvalidate.sanitize_filename(attachment_name)
+        attachment_title = title
+        if not attachment_title:
+            attachment_title = Path(sanitized_filename).stem or sanitized_filename
+
+        return DocumentMetadataOverrides(
+            filename=sanitized_filename,
+            title=attachment_title,
+            correspondent_id=correspondent_id,
+            document_type_id=document_type_id,
+            storage_path_id=storage_path_id,
+            tag_ids=tag_ids,
+            created=created or email_created,
+            asn=archive_serial_number if attachment_count == 1 else None,
+            owner_id=owner_id,
+            custom_fields=custom_fields,
+        )
+
+    def _queue_eml_attachments(
+        self,
+        *,
+        doc_name: str,
+        doc_data: bytes,
+        title: str | None,
+        created: date | None,
+        correspondent_id: int | None,
+        document_type_id: int | None,
+        storage_path_id: int | None,
+        tag_ids: list[int] | None,
+        archive_serial_number: int | None,
+        custom_fields: dict[int, Any] | None,
+        owner_id: int,
+        source: DocumentSource,
+    ) -> list[str]:
+        if not doc_name.lower().endswith(".eml"):
+            return []
+
+        message = BytesParser(policy=email_policy.default).parsebytes(doc_data)
+        email_created = None
+        if message.get("Date"):
+            try:
+                parsed_date = parsedate_to_datetime(message["Date"])
+            except (TypeError, ValueError, IndexError):
+                parsed_date = None
+            if parsed_date is not None:
+                email_created = parsed_date.date()
+
+        supported_attachments: list[tuple[str, bytes]] = []
+        for attachment_index, part in enumerate(message.iter_attachments(), start=1):
+            attachment_name = part.get_filename() or f"attachment-{attachment_index}"
+            payload = part.get_payload(decode=True)
+            if payload is None and part.get_content_type() == "message/rfc822":
+                payload = part.as_bytes(policy=email_policy.default)
+                if not attachment_name.lower().endswith(".eml"):
+                    attachment_name = f"{attachment_name}.eml"
+            if not payload:
+                continue
+
+            mime_type = magic.from_buffer(payload, mime=True)
+            if (
+                mime_type in settings.CONSUMER_PDF_RECOVERABLE_MIME_TYPES
+                and attachment_name.lower().endswith(".pdf")
+            ):
+                mime_type = "application/pdf"
+
+            if is_mime_type_supported(mime_type):
+                supported_attachments.append((attachment_name, payload))
+
+        if not supported_attachments:
+            return []
+
+        settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+        task_ids: list[str] = []
+
+        for attachment_name, payload in supported_attachments:
+            temp_dir = Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR))
+            temp_file_path = temp_dir / Path(
+                pathvalidate.sanitize_filename(attachment_name),
+            )
+            temp_file_path.write_bytes(payload)
+
+            input_doc = ConsumableDocument(
+                source=source,
+                original_file=temp_file_path,
+            )
+            input_doc_overrides = self._build_upload_attachment_overrides(
+                attachment_name=attachment_name,
+                attachment_count=len(supported_attachments),
+                title=title,
+                email_created=email_created,
+                created=created,
+                correspondent_id=correspondent_id,
+                document_type_id=document_type_id,
+                storage_path_id=storage_path_id,
+                tag_ids=tag_ids,
+                archive_serial_number=archive_serial_number,
+                custom_fields=custom_fields,
+                owner_id=owner_id,
+            )
+
+            async_task = consume_file.delay(
+                input_doc,
+                input_doc_overrides,
+            )
+            task_ids.append(async_task.id)
+
+        return task_ids
+
     def post(self, request, *args, **kwargs):
         if not request.user.has_perm("documents.add_document"):
             return HttpResponseForbidden("Insufficient permissions")
@@ -2761,6 +2890,31 @@ class PostDocumentView(GenericAPIView):
             custom_fields = cf
         elif isinstance(cf, list) and cf:
             custom_fields = dict.fromkeys(cf, None)
+
+        source = DocumentSource.WebUI if from_webui else DocumentSource.ApiUpload
+
+        attachment_task_ids = self._queue_eml_attachments(
+            doc_name=doc_name,
+            doc_data=doc_data,
+            title=title,
+            created=created,
+            correspondent_id=correspondent_id,
+            document_type_id=document_type_id,
+            storage_path_id=storage_path_id,
+            tag_ids=tag_ids,
+            archive_serial_number=archive_serial_number,
+            custom_fields=custom_fields,
+            owner_id=request.user.id,
+            source=source,
+        )
+        if attachment_task_ids:
+            return Response(
+                {
+                    "task_id": attachment_task_ids[0],
+                    "task_ids": attachment_task_ids,
+                },
+            )
+
         input_doc_overrides = DocumentMetadataOverrides(
             filename=doc_name,
             title=title,

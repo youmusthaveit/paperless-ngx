@@ -54,6 +54,23 @@ describe('UploadDocumentsService', () => {
     req[0].flush('123-456')
   })
 
+  it('accepts multiple task ids for uploaded eml attachments', () => {
+    const file = new File(
+      [new Blob(['testing'], { type: 'message/rfc822' })],
+      'mail.eml'
+    )
+    uploadDocumentsService.uploadFile(file)
+    const req = httpTestingController.match(
+      `${environment.apiBaseUrl}documents/post_document/`
+    )
+
+    req[0].flush({ task_id: 'task-1', task_ids: ['task-1', 'task-2'] })
+
+    expect(
+      websocketStatusService.getConsumerStatusNotCompleted()[0]?.taskId
+    ).toEqual('task-1')
+  })
+
   it('updates progress during upload and failure', () => {
     const file = new File(
       [new Blob(['testing'], { type: 'application/pdf' })],

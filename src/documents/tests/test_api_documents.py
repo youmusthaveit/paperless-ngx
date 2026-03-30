@@ -1,4 +1,5 @@
 import datetime
+import email
 import json
 import shutil
 import tempfile
@@ -18,6 +19,7 @@ from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DataError
 from django.test import override_settings
 from django.utils import timezone
@@ -1663,6 +1665,67 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
             )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.consume_file_mock.assert_not_called()
+
+    def test_upload_eml_extracts_supported_attachments(self) -> None:
+        attachment_one = (Path(__file__).parent / "samples" / "simple.pdf").read_bytes()
+        attachment_two = (Path(__file__).parent / "samples" / "simple.pdf").read_bytes()
+
+        email_message = email.message.EmailMessage()
+        email_message["Subject"] = "Incoming invoice"
+        email_message["From"] = "sender@example.com"
+        email_message["Date"] = "Tue, 12 Mar 2024 09:15:00 +0000"
+        email_message.set_content("Please see attachments.")
+        email_message.add_attachment(
+            attachment_one,
+            maintype="application",
+            subtype="pdf",
+            filename="invoice-1.pdf",
+        )
+        email_message.add_attachment(
+            attachment_two,
+            maintype="application",
+            subtype="pdf",
+            filename="invoice-2.pdf",
+        )
+
+        self.consume_file_mock.side_effect = [
+            celery.result.AsyncResult(id="task-1"),
+            celery.result.AsyncResult(id="task-2"),
+        ]
+
+        response = self.client.post(
+            "/api/documents/post_document/",
+            {
+                "document": SimpleUploadedFile(
+                    "mail-drop.eml",
+                    email_message.as_bytes(),
+                    content_type="text/plain",
+                ),
+                "document_type": DocumentType.objects.create(name="Invoices").id,
+                "tags": [Tag.objects.create(name="mail").id],
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {"task_id": "task-1", "task_ids": ["task-1", "task-2"]},
+        )
+        self.assertEqual(self.consume_file_mock.call_count, 2)
+
+        first_input_doc, first_overrides = self.get_specific_consume_delay_call_args(0)
+        second_input_doc, second_overrides = self.get_specific_consume_delay_call_args(
+            1,
+        )
+
+        self.assertEqual(first_input_doc.original_file.name, "invoice-1.pdf")
+        self.assertEqual(second_input_doc.original_file.name, "invoice-2.pdf")
+        self.assertEqual(first_overrides.filename, "invoice-1.pdf")
+        self.assertEqual(second_overrides.filename, "invoice-2.pdf")
+        self.assertEqual(first_overrides.title, "invoice-1")
+        self.assertEqual(second_overrides.title, "invoice-2")
+        self.assertEqual(first_overrides.created, date(2024, 3, 12))
+        self.assertEqual(second_overrides.created, date(2024, 3, 12))
 
     def test_upload_with_title(self) -> None:
         self.consume_file_mock.return_value = celery.result.AsyncResult(
