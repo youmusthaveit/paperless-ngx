@@ -29,6 +29,7 @@ import { LoadingComponentWithPermissions } from '../../loading-component/loading
 
 @Component({
   selector: 'pngx-remote-import',
+  standalone: true,
   templateUrl: './remote-import.component.html',
   styleUrl: './remote-import.component.scss',
   imports: [
