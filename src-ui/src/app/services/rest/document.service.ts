@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core'
-import { Observable } from 'rxjs'
-import { map } from 'rxjs/operators'
+import { Observable, from } from 'rxjs'
+import { concatMap, defaultIfEmpty, last, map } from 'rxjs/operators'
 import { AuditLogEntry } from 'src/app/data/auditlog-entry'
 import { CustomField } from 'src/app/data/custom-field'
 import {
@@ -85,6 +85,7 @@ export interface RemovePasswordDocumentsRequest {
   providedIn: 'root',
 })
 export class DocumentService extends AbstractPaperlessService<Document> {
+  private static readonly BULK_OPERATION_BATCH_SIZE = 500
   private permissionsService = inject(PermissionsService)
   private settingsService = inject(SettingsService)
   private customFieldService = inject(CustomFieldsService)
@@ -389,9 +390,17 @@ export class DocumentService extends AbstractPaperlessService<Document> {
   }
 
   deleteDocuments(ids: number[]) {
-    return this.http.post(this.getResourceUrl(null, 'delete'), {
-      documents: ids,
-    })
+    const batches = this.chunkDocumentIds(ids)
+
+    return from(batches).pipe(
+      concatMap((documents) =>
+        this.http.post(this.getResourceUrl(null, 'delete'), {
+          documents,
+        })
+      ),
+      last(),
+      defaultIfEmpty(null)
+    )
   }
 
   reprocessDocuments(ids: number[]) {
@@ -491,5 +500,23 @@ export class DocumentService extends AbstractPaperlessService<Document> {
       message: message,
       use_archive_version: useArchiveVersion,
     })
+  }
+
+  private chunkDocumentIds(ids: number[]): number[][] {
+    if (ids.length === 0) {
+      return []
+    }
+
+    const chunks: number[][] = []
+    for (
+      let index = 0;
+      index < ids.length;
+      index += DocumentService.BULK_OPERATION_BATCH_SIZE
+    ) {
+      chunks.push(
+        ids.slice(index, index + DocumentService.BULK_OPERATION_BATCH_SIZE)
+      )
+    }
+    return chunks
   }
 }

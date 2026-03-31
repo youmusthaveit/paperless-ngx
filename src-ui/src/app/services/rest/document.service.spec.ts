@@ -240,6 +240,40 @@ describe(`DocumentService`, () => {
     expect(req.request.body).toEqual({
       documents: ids,
     })
+    req.flush(true)
+  })
+
+  it('should batch delete documents for large selections', () => {
+    const ids = Array.from({ length: 1001 }, (_, index) => index + 1)
+
+    subscription = service.deleteDocuments(ids).subscribe()
+
+    let requests = httpTestingController.match(
+      `${environment.apiBaseUrl}${endpoint}/delete/`
+    )
+    expect(requests.length).toEqual(1)
+    expect(requests[0].request.body).toEqual({
+      documents: ids.slice(0, 500),
+    })
+    requests[0].flush(true)
+
+    requests = httpTestingController.match(
+      `${environment.apiBaseUrl}${endpoint}/delete/`
+    )
+    expect(requests.length).toEqual(1)
+    expect(requests[0].request.body).toEqual({
+      documents: ids.slice(500, 1000),
+    })
+    requests[0].flush(true)
+
+    requests = httpTestingController.match(
+      `${environment.apiBaseUrl}${endpoint}/delete/`
+    )
+    expect(requests.length).toEqual(1)
+    expect(requests[0].request.body).toEqual({
+      documents: ids.slice(1000),
+    })
+    requests[0].flush(true)
   })
 
   it('should call appropriate api endpoint for reprocess documents', () => {

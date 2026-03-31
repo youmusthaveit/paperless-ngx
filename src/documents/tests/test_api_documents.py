@@ -851,6 +851,10 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         )
 
     def test_document_delete_blocked_until_delete_allowed_at(self) -> None:
+        restricted_user = User.objects.create_user(username="restricted-delete-user")
+        restricted_user.user_permissions.add(*Permission.objects.all())
+        self.client.force_authenticate(user=restricted_user)
+
         doc = Document.objects.create(
             title="locked",
             checksum="blocked-delete",
@@ -866,19 +870,41 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         doc.refresh_from_db()
         self.assertIsNone(doc.deleted_at)
 
+    def test_superuser_can_delete_document_before_delete_allowed_at(self) -> None:
+        doc = Document.objects.create(
+            title="locked-superuser",
+            checksum="blocked-delete-superuser",
+            mime_type="application/pdf",
+        )
+        Document.objects.filter(pk=doc.pk).update(
+            delete_allowed_at=timezone.localdate() + timedelta(days=5),
+        )
+
+        response = self.client.delete(f"/api/documents/{doc.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        doc.refresh_from_db()
+        self.assertIsNotNone(doc.deleted_at)
+
     def test_document_version_delete_blocked_until_delete_allowed_at(self) -> None:
+        restricted_user = User.objects.create_user(
+            username="restricted-version-delete-user",
+        )
+        restricted_user.user_permissions.add(*Permission.objects.all())
+        self.client.force_authenticate(user=restricted_user)
+
         root_doc = Document.objects.create(
             title="Root",
             checksum="root-locked",
             mime_type="application/pdf",
-            owner=self.user,
+            owner=restricted_user,
         )
         version_doc = Document.objects.create(
             title="Version",
             checksum="version-locked",
             mime_type="application/pdf",
             root_document=root_doc,
-            owner=self.user,
+            owner=restricted_user,
         )
         Document.objects.filter(pk=version_doc.pk).update(
             delete_allowed_at=timezone.localdate() + timedelta(days=5),
@@ -891,6 +917,34 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         version_doc.refresh_from_db()
         self.assertIsNone(version_doc.deleted_at)
+
+    def test_superuser_can_delete_document_version_before_delete_allowed_at(
+        self,
+    ) -> None:
+        root_doc = Document.objects.create(
+            title="Root",
+            checksum="root-locked-superuser",
+            mime_type="application/pdf",
+            owner=self.user,
+        )
+        version_doc = Document.objects.create(
+            title="Version",
+            checksum="version-locked-superuser",
+            mime_type="application/pdf",
+            root_document=root_doc,
+            owner=self.user,
+        )
+        Document.objects.filter(pk=version_doc.pk).update(
+            delete_allowed_at=timezone.localdate() + timedelta(days=5),
+        )
+
+        response = self.client.delete(
+            f"/api/documents/{root_doc.pk}/versions/{version_doc.pk}/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        version_doc.refresh_from_db()
+        self.assertIsNotNone(version_doc.deleted_at)
 
     @override_settings(AUDIT_LOG_ENABLED=False)
     def test_document_history_action_disabled(self) -> None:

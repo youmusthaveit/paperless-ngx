@@ -55,6 +55,7 @@ import { SwitchComponent } from '../../common/input/switch/switch.component'
 import { TextComponent } from '../../common/input/text/text.component'
 import { PageHeaderComponent } from '../../common/page-header/page-header.component'
 import { LoadingComponentWithPermissions } from '../../loading-component/loading.component'
+import { RemoteImportComponent } from '../remote-import/remote-import.component'
 
 @Component({
   selector: 'pngx-config',
@@ -62,6 +63,7 @@ import { LoadingComponentWithPermissions } from '../../loading-component/loading
   styleUrl: './config.component.scss',
   imports: [
     PageHeaderComponent,
+    RemoteImportComponent,
     SelectComponent,
     SwitchComponent,
     TextComponent,
@@ -78,6 +80,7 @@ export class ConfigComponent
   extends LoadingComponentWithPermissions
   implements OnInit, OnDestroy, DirtyComponent
 {
+  public readonly remoteImportTab = $localize`Remote Import`
   private configService = inject(ConfigService)
   private toastService = inject(ToastService)
   private settingsService = inject(SettingsService)
@@ -123,7 +126,7 @@ export class ConfigComponent
   })
 
   get optionCategories(): string[] {
-    return Object.values(ConfigCategory)
+    return [...Object.values(ConfigCategory), this.remoteImportTab]
   }
 
   getCategoryOptions(category: string): ConfigOption[] {

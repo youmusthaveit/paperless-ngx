@@ -23,6 +23,7 @@ from django.http import FileResponse
 from django.http import HttpResponseBadRequest
 from django.http import HttpResponseForbidden
 from django.http import HttpResponseNotFound
+from django.utils import timezone
 from django.views.generic import View
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
@@ -58,12 +59,17 @@ from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
 from paperless.models import S3StorageConfiguration
+from paperless.remote_import import RemoteImportService
 from paperless.serialisers import ApplicationConfigurationSerializer
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import PaperlessAuthTokenSerializer
 from paperless.serialisers import ProfileSerializer
+from paperless.serialisers import RemoteImportBrowseSerializer
+from paperless.serialisers import RemoteImportConnectionSerializer
+from paperless.serialisers import RemoteImportStartSerializer
 from paperless.serialisers import S3StorageConfigurationSerializer
 from paperless.serialisers import UserSerializer
+from paperless.tasks import import_remote_documents
 from paperless_ai.indexing import vector_store_file_exists
 
 
@@ -787,6 +793,128 @@ class ApplicationConfigurationViewSet(ModelViewSet):
         )
         response._resource_closers.append(temp_dir.cleanup)
         return response
+
+    @action(detail=True, methods=["post"], url_path="remote-import-inspect")
+    def remote_import_inspect(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = RemoteImportConnectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = RemoteImportService(
+            base_url=self._resolve_remote_import_base_url(
+                serializer.validated_data.get("base_url"),
+                config,
+            ),
+            api_token=self._resolve_remote_import_api_token(
+                serializer.validated_data.get("api_token"),
+                config,
+            ),
+            owner_id=request.user.id if request.user else None,
+        )
+        return Response(service.inspect())
+
+    @action(detail=True, methods=["post"], url_path="remote-import-documents")
+    def remote_import_documents(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = RemoteImportBrowseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = RemoteImportService(
+            base_url=self._resolve_remote_import_base_url(
+                serializer.validated_data.get("base_url"),
+                config,
+            ),
+            api_token=self._resolve_remote_import_api_token(
+                serializer.validated_data.get("api_token"),
+                config,
+            ),
+            owner_id=request.user.id if request.user else None,
+        )
+        return Response(
+            service.browse_documents(
+                query=serializer.validated_data["query"],
+                page=serializer.validated_data["page"],
+                page_size=serializer.validated_data["page_size"],
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remote-import-start")
+    def remote_import_start(self, request, *args, **kwargs):
+        config = self.get_object()
+        serializer = RemoteImportStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        resolved_base_url = self._resolve_remote_import_base_url(
+            serializer.validated_data.get("base_url"),
+            config,
+        )
+        resolved_api_token = self._resolve_remote_import_api_token(
+            serializer.validated_data.get("api_token"),
+            config,
+        )
+
+        async_task = import_remote_documents.delay(
+            base_url=resolved_base_url,
+            api_token=resolved_api_token,
+            selected_document_ids=serializer.validated_data.get(
+                "selected_document_ids",
+            ),
+            query=serializer.validated_data.get("query", ""),
+            import_all=serializer.validated_data.get("import_all", False),
+            create_missing_items=serializer.validated_data.get(
+                "create_missing_items",
+                True,
+            ),
+            import_notes=serializer.validated_data.get("import_notes", True),
+            owner_id=request.user.id if request.user else None,
+        )
+
+        parsed_url = resolved_base_url.rstrip("/")
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=async_task.id,
+            task_name=PaperlessTask.TaskName.IMPORT_FILE,
+            status=states.PENDING,
+            date_created=timezone.now(),
+            task_file_name=f"Remote import from {parsed_url}",
+            owner=request.user
+            if request.user and request.user.is_authenticated
+            else None,
+        )
+
+        return Response({"task_id": async_task.id})
+
+    @staticmethod
+    def _looks_masked_secret(value: str | None) -> bool:
+        return bool(value) and value.replace("*", "") == ""
+
+    def _resolve_remote_import_base_url(
+        self,
+        value: str | None,
+        config: ApplicationConfiguration,
+    ) -> str:
+        resolved = value or config.remote_import_base_url
+        if not resolved:
+            raise ValidationError(
+                {"base_url": "A remote base URL is required."},
+            )
+        return resolved
+
+    def _resolve_remote_import_api_token(
+        self,
+        value: str | None,
+        config: ApplicationConfiguration,
+    ) -> str:
+        resolved = (
+            config.remote_import_api_token
+            if self._looks_masked_secret(value) or not value
+            else value
+        )
+        if not resolved:
+            raise ValidationError(
+                {"api_token": "A remote API token is required."},
+            )
+        return resolved
 
 
 @extend_schema_view(

@@ -246,6 +246,11 @@ export const routes: Routes = [
         },
       },
       {
+        path: 'remote-import',
+        redirectTo: 'config',
+        pathMatch: 'full',
+      },
+      {
         path: 'tasks',
         component: TasksComponent,
         canActivate: [PermissionsGuard],

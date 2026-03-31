@@ -15,6 +15,7 @@
                 <ng-template ngbNavContent>
                     <div class="p-3">
                         @if (
+                          category !== remoteImportTab &&
                           category !== ConfigCategory.Storage &&
                           category !== ConfigCategory.Backup
                         ) {
@@ -333,6 +334,14 @@
                                     </table>
                                 </div>
                             </div>
+                        }
+                        @if (category === remoteImportTab) {
+                            <pngx-remote-import
+                                [embedded]="true"
+                                [configIdOverride]="configForm.get('id')?.value"
+                                [initialBaseUrl]="configForm.get('remote_import_base_url')?.value"
+                                [initialApiToken]="configForm.get('remote_import_api_token')?.value">
+                            </pngx-remote-import>
                         }
                     </div>
                 </ng-template>

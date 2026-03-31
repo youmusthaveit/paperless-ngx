@@ -1,0 +1,292 @@
+@if (!embedded) {
+  <pngx-page-header
+    title="Remote Import"
+    i18n-title
+    info="Connect to another Paperless-ngx instance, inspect its documents and metadata, then import either selected documents or the full filtered result set."
+    i18n-info>
+  </pngx-page-header>
+}
+
+<form [formGroup]="form" class="pb-4">
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-xl-5">
+          <label class="form-label fw-semibold" i18n>Remote Base URL</label>
+          <input class="form-control" formControlName="base_url" placeholder="https://remote.example.com" />
+          <div class="form-text" i18n>The remote instance URL. `/api/` is added automatically when needed.</div>
+        </div>
+        <div class="col-12 col-xl-4">
+          <label class="form-label fw-semibold" i18n>API Token</label>
+          <input class="form-control" type="password" formControlName="api_token" />
+        </div>
+        <div class="col-12 col-xl-3 d-flex gap-2">
+          <button
+            type="button"
+            class="btn btn-primary flex-grow-1"
+            [disabled]="testingConnection || !form.value.base_url || !form.value.api_token"
+            (click)="inspectRemote()">
+            <i-bs name="plug" class="me-1"></i-bs><ng-container i18n>Analyze Remote</ng-container>
+          </button>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-12 col-xl-8">
+          <label class="form-label fw-semibold" i18n>Document Query</label>
+          <input
+            class="form-control"
+            formControlName="query"
+            placeholder="tag:invoice or correspondent:&quot;ACME&quot;"
+          />
+          <div class="form-text" i18n>Optional Paperless search query used for preview and for importing all matching documents.</div>
+        </div>
+        <div class="col-12 col-sm-6 col-xl-2">
+          <div class="form-check form-switch mt-4 pt-2">
+            <input class="form-check-input" type="checkbox" formControlName="create_missing_items" id="createMissingItems" />
+            <label class="form-check-label" for="createMissingItems" i18n>Create missing metadata</label>
+          </div>
+        </div>
+        <div class="col-12 col-sm-6 col-xl-2">
+          <div class="form-check form-switch mt-4 pt-2">
+            <input class="form-check-input" type="checkbox" formControlName="import_notes" id="importNotes" />
+            <label class="form-check-label" for="importNotes" i18n>Import notes</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-end mt-3">
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm"
+          [disabled]="savingDefaults || !form.value.base_url || !form.value.api_token"
+          (click)="saveConnectionDefaults()">
+          <i-bs name="save" class="me-1"></i-bs><ng-container i18n>Save Connection</ng-container>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  @if (activeTask) {
+    <div
+      class="card border-0 shadow-sm mb-4"
+      [ngClass]="{
+        'border-success-subtle': activeTask.status === 'SUCCESS',
+        'border-danger-subtle': activeTask.status === 'FAILURE'
+      }">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+          <div>
+            <h5 class="mb-1" i18n>Import Run</h5>
+            <div class="small text-muted">
+              <span i18n>Status</span>: {{ activeTask.status }}
+            </div>
+          </div>
+          @if (activeTask.status === 'STARTED' || activeTask.status === 'PENDING') {
+            <div class="spinner-border spinner-border-sm" role="status"></div>
+          }
+        </div>
+        <pre class="mb-0 small task-result">{{ activeTask.result }}</pre>
+      </div>
+    </div>
+  }
+
+  @if (inspection) {
+    <div class="row g-3 mb-4">
+      <div class="col-12 col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body">
+            <div class="small text-uppercase text-muted mb-2" i18n>Remote Instance</div>
+            <h4 class="mb-1">{{ inspection.remote.app_title }}</h4>
+            <div class="text-muted small">{{ inspection.remote.base_url }}</div>
+            <hr />
+            <div class="summary-grid">
+              <div><span i18n>Documents</span><strong>{{ inspection.remote.document_count }}</strong></div>
+              <div><span i18n>Correspondents</span><strong>{{ inspection.remote.correspondent_count }}</strong></div>
+              <div><span i18n>Tags</span><strong>{{ inspection.remote.tag_count }}</strong></div>
+              <div><span i18n>Document types</span><strong>{{ inspection.remote.document_type_count }}</strong></div>
+              <div><span i18n>Storage paths</span><strong>{{ inspection.remote.storage_path_count }}</strong></div>
+              <div><span i18n>Custom fields</span><strong>{{ inspection.remote.custom_field_count }}</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-8">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+              <h5 class="mb-0" i18n>Metadata Mapping</h5>
+              <button type="button" class="btn btn-outline-secondary btn-sm" (click)="loadDocuments()" [disabled]="loadingDocuments">
+                <i-bs name="arrow-repeat" class="me-1"></i-bs><ng-container i18n>Refresh Preview</ng-container>
+              </button>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12 col-md-6 col-xl-4">
+                <div class="mapping-card">
+                  <div class="mapping-title" i18n>Correspondents</div>
+                  <div class="mapping-stats">{{ inspection.mappings.correspondents.matched }} / {{ inspection.mappings.correspondents.total }}</div>
+                  <div class="small text-muted">{{ inspection.mappings.correspondents.missing.length }} missing</div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-4">
+                <div class="mapping-card">
+                  <div class="mapping-title" i18n>Tags</div>
+                  <div class="mapping-stats">{{ inspection.mappings.tags.matched }} / {{ inspection.mappings.tags.total }}</div>
+                  <div class="small text-muted">{{ inspection.mappings.tags.missing.length }} missing</div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-4">
+                <div class="mapping-card">
+                  <div class="mapping-title" i18n>Document Types</div>
+                  <div class="mapping-stats">{{ inspection.mappings.document_types.matched }} / {{ inspection.mappings.document_types.total }}</div>
+                  <div class="small text-muted">{{ inspection.mappings.document_types.missing.length }} missing</div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-4">
+                <div class="mapping-card">
+                  <div class="mapping-title" i18n>Storage Paths</div>
+                  <div class="mapping-stats">{{ inspection.mappings.storage_paths.matched }} / {{ inspection.mappings.storage_paths.total }}</div>
+                  <div class="small text-muted">{{ inspection.mappings.storage_paths.missing.length }} missing</div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-4">
+                <div class="mapping-card">
+                  <div class="mapping-title" i18n>Custom Fields</div>
+                  <div class="mapping-stats">{{ inspection.mappings.custom_fields.matched }} / {{ inspection.mappings.custom_fields.total }}</div>
+                  <div class="small text-muted">{{ inspection.mappings.custom_fields.missing.length }} missing</div>
+                </div>
+              </div>
+            </div>
+
+            @if (inspection.mappings.custom_fields.missing.length > 0) {
+              <div class="alert alert-warning mt-3 mb-0 small">
+                <strong i18n>Custom field differences detected.</strong>
+                <span i18n>Fields with the same name but a different type are not mapped automatically.</span>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+          <div>
+            <h5 class="mb-1" i18n>Remote Documents</h5>
+            <div class="small text-muted">{{ documentsPage?.count || 0 }} documents match the current query.</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" (click)="toggleCurrentPageSelection()" [disabled]="currentResults.length === 0">
+              <i-bs name="check2-square" class="me-1"></i-bs>
+              @if (allCurrentPageSelected) {
+                <ng-container i18n>Unselect Page</ng-container>
+              } @else {
+                <ng-container i18n>Select Page</ng-container>
+              }
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" (click)="clearSelection()" [disabled]="selectedCount === 0">
+              <i-bs name="x" class="me-1"></i-bs><ng-container i18n>Clear Selection</ng-container>
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" (click)="startSelectedImport()" [disabled]="selectedCount === 0 || startingImport">
+              <i-bs name="download" class="me-1"></i-bs><ng-container i18n>Import Selected</ng-container>
+            </button>
+            <button type="button" class="btn btn-success btn-sm" (click)="startImportAll()" [disabled]="startingImport || (documentsPage?.count || 0) === 0">
+              <i-bs name="cloud-download" class="me-1"></i-bs><ng-container i18n>Import All Matching</ng-container>
+            </button>
+          </div>
+        </div>
+
+        @if (loadingDocuments) {
+          <div class="py-5 text-center text-muted">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+            <span i18n>Loading remote documents...</span>
+          </div>
+        } @else {
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th style="width: 3rem;">
+                    <input type="checkbox" class="form-check-input" [checked]="allCurrentPageSelected" (change)="toggleCurrentPageSelection()" />
+                  </th>
+                  <th i18n>Title</th>
+                  <th i18n>Created</th>
+                  <th i18n>Metadata</th>
+                  <th i18n>Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (document of currentResults; track trackByDocumentId($index, document)) {
+                  <tr>
+                    <td>
+                      <input type="checkbox" class="form-check-input" [checked]="selection.has(document.id)" (change)="toggleSelection(document.id)" />
+                    </td>
+                    <td>
+                      <div class="fw-semibold">
+                        @if (document.document_url) {
+                          <a
+                            [href]="document.document_url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="remote-document-link">
+                            {{ document.title || document.original_file_name || ('Document #' + document.id) }}
+                          </a>
+                        } @else {
+                          {{ document.title || document.original_file_name || ('Document #' + document.id) }}
+                        }
+                      </div>
+                      <div class="small text-muted">{{ document.original_file_name }}</div>
+                    </td>
+                    <td class="small text-muted">{{ document.created || '—' }}</td>
+                    <td>
+                      <div class="small">
+                        <div><strong i18n>Correspondent</strong>: {{ document.correspondent?.name || '—' }}</div>
+                        <div><strong i18n>Type</strong>: {{ document.document_type?.name || '—' }}</div>
+                        <div><strong i18n>Storage</strong>: {{ document.storage_path?.name || '—' }}</div>
+                        @if (document.custom_fields.length > 0) {
+                          <div class="text-muted mt-1">
+                            <span i18n>Custom fields</span>: {{ document.custom_fields.length }}
+                          </div>
+                        }
+                      </div>
+                    </td>
+                    <td>
+                      @if (document.tags.length > 0) {
+                        <div class="d-flex flex-wrap gap-1">
+                          @for (tag of document.tags; track tag.id) {
+                            <span class="badge rounded-pill text-bg-light">{{ tag.name }}</span>
+                          }
+                        </div>
+                      } @else {
+                        <span class="text-muted small">—</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="5" class="text-center text-muted py-5" i18n>No documents found for the current query.</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          @if ((documentsPage?.count || 0) > pageSize) {
+            <div class="d-flex justify-content-end pt-2">
+              <ngb-pagination
+                [(page)]="page"
+                [pageSize]="pageSize"
+                [collectionSize]="documentsPage?.count || 0"
+                (pageChange)="onPageChange($event)"
+                size="sm">
+              </ngb-pagination>
+            </div>
+          }
+        }
+      </div>
+    </div>
+  }
+</form>

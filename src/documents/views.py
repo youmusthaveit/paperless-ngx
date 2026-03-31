@@ -1054,11 +1054,9 @@ class DocumentViewSet(
         return response
 
     def destroy(self, request, *args, **kwargs):
-        from documents import index
-
-        index.remove_document_from_index(self.get_object())
         try:
-            return super().destroy(request, *args, **kwargs)
+            bulk_edit.delete([self.get_object().pk], user=request.user)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             if "Data too long for column" in str(e):
                 logger.warning(
@@ -1891,12 +1889,9 @@ class DocumentViewSet(
                 "Cannot delete the root/original version. Delete the document instead.",
             )
 
-        from documents import index
-
-        index.remove_document_from_index(version_doc)
         version_doc_id = version_doc.id
         try:
-            version_doc.delete()
+            bulk_edit.delete([version_doc.id], user=request.user)
         except DjangoValidationError as e:
             return HttpResponseBadRequest(str(e))
         index.add_or_update_document(root_doc)
@@ -2304,6 +2299,7 @@ class DocumentOperationPermissionMixin(PassUserMixin):
     permission_classes = (IsAuthenticated,)
     parser_classes = (parsers.JSONParser,)
     METHOD_NAMES_REQUIRING_USER = {
+        "delete",
         "split",
         "merge",
         "rotate",

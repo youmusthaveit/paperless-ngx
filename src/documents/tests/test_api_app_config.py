@@ -15,6 +15,7 @@ from documents.tests.utils import DirectoriesMixin
 from paperless.models import ApplicationConfiguration
 from paperless.models import ColorConvertChoices
 from paperless.models import S3StorageConfiguration
+from paperless.remote_import import RemoteImportService
 
 
 class TestApiAppConfig(DirectoriesMixin, APITestCase):
@@ -59,6 +60,8 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
                 "color_conversion_strategy": None,
                 "user_args": None,
                 "app_title": None,
+                "remote_import_base_url": None,
+                "remote_import_api_token": None,
                 "app_logo": None,
                 "documents_storage_type": None,
                 "documents_storage_prefix": None,
@@ -213,6 +216,54 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
 
         config.refresh_from_db()
         self.assertEqual(config.documents_s3_secret_access_key, "keep-me")
+
+    def test_api_update_remote_import_credentials(self):
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "remote_import_base_url": "https://remote.example.com",
+                    "remote_import_api_token": "very-secret-token",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config = ApplicationConfiguration.objects.first()
+        self.assertEqual(
+            config.remote_import_base_url,
+            "https://remote.example.com",
+        )
+        self.assertEqual(
+            config.remote_import_api_token,
+            "very-secret-token",
+        )
+
+        response = self.client.get(self.ENDPOINT, format="json")
+        self.assertNotEqual(
+            response.data[0]["remote_import_api_token"],
+            "very-secret-token",
+        )
+
+    def test_api_update_remote_import_token_keeps_existing_masked_value(self):
+        config = ApplicationConfiguration.objects.first()
+        config.remote_import_api_token = "keep-remote-token"
+        config.save()
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}1/",
+            json.dumps(
+                {
+                    "remote_import_api_token": "**********",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        config.refresh_from_db()
+        self.assertEqual(config.remote_import_api_token, "keep-remote-token")
 
     def test_api_update_document_backup_config(self):
         selected_storage = S3StorageConfiguration.objects.create(
@@ -1348,3 +1399,200 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             response["Content-Disposition"],
         )
         self.assertEqual(b"".join(response.streaming_content), b"zip-content")
+
+    def test_api_remote_import_inspect(self):
+        with mock.patch(
+            "paperless.views.RemoteImportService.inspect",
+            return_value={
+                "remote": {
+                    "base_url": "https://remote.example.com/api/",
+                    "app_title": "Remote",
+                    "document_count": 12,
+                    "correspondent_count": 2,
+                    "tag_count": 3,
+                    "document_type_count": 4,
+                    "storage_path_count": 1,
+                    "custom_field_count": 5,
+                },
+                "mappings": {
+                    "correspondents": {"total": 2, "matched": 1, "missing": []},
+                    "tags": {"total": 3, "matched": 3, "missing": []},
+                    "document_types": {"total": 4, "matched": 4, "missing": []},
+                    "storage_paths": {"total": 1, "matched": 1, "missing": []},
+                    "custom_fields": {"total": 5, "matched": 4, "missing": []},
+                },
+            },
+        ) as inspect_mock:
+            response = self.client.post(
+                "/api/config/1/remote-import-inspect/",
+                json.dumps(
+                    {
+                        "base_url": "https://remote.example.com",
+                        "api_token": "secret-token",
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        inspect_mock.assert_called_once()
+        self.assertEqual(response.data["remote"]["document_count"], 12)
+
+    def test_api_remote_import_documents(self):
+        with mock.patch(
+            "paperless.views.RemoteImportService.browse_documents",
+            return_value={
+                "count": 1,
+                "next": None,
+                "previous": None,
+                "all": [7],
+                "results": [
+                    {
+                        "id": 7,
+                        "document_url": "https://remote.example.com/documents/7",
+                        "title": "Invoice 7",
+                        "created": "2026-03-29",
+                        "original_file_name": "invoice-7.pdf",
+                        "archive_serial_number": None,
+                        "correspondent": None,
+                        "document_type": None,
+                        "storage_path": None,
+                        "tags": [],
+                        "custom_fields": [],
+                    },
+                ],
+            },
+        ) as browse_mock:
+            response = self.client.post(
+                "/api/config/1/remote-import-documents/",
+                json.dumps(
+                    {
+                        "base_url": "https://remote.example.com",
+                        "api_token": "secret-token",
+                        "query": "invoice",
+                        "page": 1,
+                        "page_size": 25,
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        browse_mock.assert_called_once_with(query="invoice", page=1, page_size=25)
+        self.assertEqual(response.data["results"][0]["id"], 7)
+        self.assertEqual(
+            response.data["results"][0]["document_url"],
+            "https://remote.example.com/documents/7",
+        )
+
+    def test_api_remote_import_start_creates_task(self):
+        async_result = mock.Mock()
+        async_result.id = str(uuid.uuid4())
+
+        with mock.patch(
+            "paperless.views.import_remote_documents.delay",
+            return_value=async_result,
+        ) as delay_mock:
+            response = self.client.post(
+                "/api/config/1/remote-import-start/",
+                json.dumps(
+                    {
+                        "base_url": "https://remote.example.com",
+                        "api_token": "secret-token",
+                        "selected_document_ids": [4, 5],
+                        "create_missing_items": True,
+                        "import_notes": True,
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["task_id"], async_result.id)
+        delay_mock.assert_called_once()
+
+        created_task = PaperlessTask.objects.get(task_id=async_result.id)
+        self.assertEqual(created_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
+        self.assertEqual(created_task.status, states.PENDING)
+
+    def test_api_remote_import_inspect_uses_saved_masked_token(self):
+        config = ApplicationConfiguration.objects.first()
+        config.remote_import_base_url = "https://remote.example.com"
+        config.remote_import_api_token = "saved-secret-token"
+        config.save()
+
+        with mock.patch(
+            "paperless.views.RemoteImportService.inspect",
+            return_value={"remote": {}, "mappings": {}},
+        ) as inspect_mock:
+            response = self.client.post(
+                "/api/config/1/remote-import-inspect/",
+                json.dumps(
+                    {
+                        "base_url": "https://remote.example.com",
+                        "api_token": "**********",
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        _, kwargs = inspect_mock.call_args
+        self.assertEqual(kwargs["api_token"], "saved-secret-token")
+
+    def test_api_remote_import_documents_accepts_nested_remote_objects(self):
+        with mock.patch(
+            "paperless.views.RemoteImportService.browse_documents",
+            return_value={
+                "count": 1,
+                "next": None,
+                "previous": None,
+                "all": [7],
+                "results": [
+                    {
+                        "id": 7,
+                        "document_url": "https://remote.example.com/documents/7",
+                        "title": "Invoice 7",
+                        "created": "2026-03-29",
+                        "original_file_name": "invoice-7.pdf",
+                        "archive_serial_number": None,
+                        "correspondent": {"id": 3, "name": "ACME"},
+                        "document_type": {"id": 2, "name": "Invoices"},
+                        "storage_path": {"id": 4, "name": "Inbox"},
+                        "tags": [{"id": 9, "name": "mail"}],
+                        "custom_fields": [],
+                    },
+                ],
+            },
+        ):
+            response = self.client.post(
+                "/api/config/1/remote-import-documents/",
+                json.dumps(
+                    {
+                        "base_url": "https://remote.example.com",
+                        "api_token": "secret-token",
+                        "query": "",
+                        "page": 1,
+                        "page_size": 25,
+                    },
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"][0]["correspondent"]["name"], "ACME")
+        self.assertEqual(
+            response.data["results"][0]["document_url"],
+            "https://remote.example.com/documents/7",
+        )
+
+    def test_remote_import_service_builds_document_urls_from_api_base_url(self):
+        service = RemoteImportService(
+            base_url="https://remote.example.com/paperless/api",
+            api_token="secret-token",
+        )
+
+        self.assertEqual(
+            service._build_remote_document_url(7),
+            "https://remote.example.com/paperless/documents/7",
+        )

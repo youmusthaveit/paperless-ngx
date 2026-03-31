@@ -621,6 +621,66 @@ class TestEmptyTrashTask(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
 
 
 class TestUpdateContent(DirectoriesMixin, TestCase):
+    @mock.patch("documents.tasks.index.add_or_update_document")
+    @mock.patch("documents.tasks.generate_unique_filename")
+    @mock.patch("documents.tasks.get_parser_registry")
+    def test_update_content_uses_new_parser_protocol(
+        self,
+        mock_get_parser_registry,
+        mock_generate_unique_filename,
+        mock_add_or_update_document,
+    ) -> None:
+        sample1 = self.dirs.scratch_dir / "sample.png"
+        sample1.write_bytes(b"test")
+
+        thumb = self.dirs.scratch_dir / "thumb.webp"
+        thumb.write_bytes(b"thumb")
+
+        archive = self.dirs.scratch_dir / "archive.pdf"
+        archive.write_bytes(b"archive")
+
+        doc = Document.objects.create(
+            title="test",
+            content="my document",
+            checksum="wow",
+            filename=sample1,
+            mime_type="image/png",
+        )
+
+        parser = mock.MagicMock()
+        parser.__enter__.return_value = parser
+        parser.get_thumbnail.return_value = thumb
+        parser.get_archive_path.return_value = archive
+        parser.get_text.return_value = "updated text"
+        parser.get_date.return_value = None
+
+        mock_get_parser_registry.return_value.get_parser_for_file.return_value = (
+            mock.Mock(return_value=parser)
+        )
+        mock_generate_unique_filename.return_value = "archive.pdf"
+
+        tasks.update_document_content_maybe_archive_file(doc.pk)
+
+        registry_args, _ = (
+            mock_get_parser_registry.return_value.get_parser_for_file.call_args
+        )
+        self.assertEqual(registry_args[0], "image/png")
+        self.assertEqual(registry_args[1], "")
+        self.assertTrue(isinstance(registry_args[2], Path))
+
+        parser.configure.assert_called_once()
+        parse_args, parse_kwargs = parser.parse.call_args
+        self.assertEqual(len(parse_args), 2)
+        self.assertEqual(parse_args[1], "image/png")
+        self.assertEqual(parse_kwargs, {})
+
+        thumbnail_args, thumbnail_kwargs = parser.get_thumbnail.call_args
+        self.assertEqual(len(thumbnail_args), 2)
+        self.assertEqual(thumbnail_args[1], "image/png")
+        self.assertEqual(thumbnail_kwargs, {})
+
+        mock_add_or_update_document.assert_called_once()
+
     def test_update_content_maybe_archive_file(self) -> None:
         """
         GIVEN:

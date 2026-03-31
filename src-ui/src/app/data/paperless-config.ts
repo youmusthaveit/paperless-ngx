@@ -392,6 +392,8 @@ export interface PaperlessConfig extends ObjectWithId {
   user_args: object
   app_logo: string
   app_title: string
+  remote_import_base_url: string
+  remote_import_api_token: string
   documents_storage_type: DocumentStorageTypeConfig
   documents_storage_prefix: string
   documents_s3_storage: number

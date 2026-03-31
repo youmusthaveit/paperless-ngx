@@ -664,31 +664,26 @@ def update_document_content_maybe_archive_file(document_id) -> None:
 
     mime_type = document.mime_type
 
-    parser_class = get_parser_registry().get_parser_for_file(
-        mime_type,
-        document.original_filename or "",
-        document.source_path,
-    )
+    try:
+        with document.local_source_path() as source_path:
+            parser_class = get_parser_registry().get_parser_for_file(
+                mime_type,
+                document.original_filename or "",
+                source_path,
+            )
 
-    if not parser_class:
-        logger.error(
-            f"No parser found for mime type {mime_type}, cannot "
-            f"archive document {document} (ID: {document_id})",
-        )
-        return
-
-    with parser_class() as parser:
-        parser.configure(ParserContext())
-
-        try:
-            with document.local_source_path() as source_path:
-                parser.parse(source_path, mime_type, document.get_public_filename())
-
-                thumbnail = parser.get_thumbnail(
-                    source_path,
-                    mime_type,
-                    document.get_public_filename(),
+            if not parser_class:
+                logger.error(
+                    f"No parser found for mime type {mime_type}, cannot "
+                    f"archive document {document} (ID: {document_id})",
                 )
+                return
+
+            with parser_class() as parser:
+                parser.configure(ParserContext())
+                parser.parse(source_path, mime_type)
+
+                thumbnail = parser.get_thumbnail(source_path, mime_type)
 
             with transaction.atomic():
                 oldDocument = Document.objects.get(pk=document.pk)
@@ -769,11 +764,10 @@ def update_document_content_maybe_archive_file(document_id) -> None:
                 llm_index_add_or_update_document(document)
 
             clear_document_caches(document.pk)
-
-        except Exception:
-            logger.exception(
-                f"Error while parsing document {document} (ID: {document_id})",
-            )
+    except Exception:
+        logger.exception(
+            f"Error while parsing document {document} (ID: {document_id})",
+        )
 
 
 @shared_task

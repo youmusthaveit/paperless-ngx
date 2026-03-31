@@ -10,27 +10,23 @@ logger = logging.getLogger("paperless.management.thumbnails")
 
 def _process_document(doc_id: int) -> None:
     document: Document = Document.objects.get(id=doc_id)
-    parser_class = get_parser_registry().get_parser_for_file(
-        document.mime_type,
-        document.original_filename or "",
-        document.source_path,
-    )
-
-    if parser_class is None:
-        logger.warning(
-            "%s: No parser for mime type %s",
-            document,
+    with document.local_source_path() as source_path:
+        parser_class = get_parser_registry().get_parser_for_file(
             document.mime_type,
+            document.original_filename or "",
+            source_path,
         )
-        return
 
-    with parser_class() as parser:
-        with document.local_source_path() as source_path:
-            thumb = parser.get_thumbnail(
-                source_path,
+        if parser_class is None:
+            logger.warning(
+                "%s: No parser for mime type %s",
+                document,
                 document.mime_type,
-                document.get_public_filename(),
             )
+            return
+
+        with parser_class() as parser:
+            thumb = parser.get_thumbnail(source_path, document.mime_type)
 
         document_write_from_path("thumbnails", document.thumbnail_name, thumb)
 

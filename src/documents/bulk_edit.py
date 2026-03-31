@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django_softdelete.models import SoftDeleteModel
 
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
@@ -337,7 +338,7 @@ def modify_custom_fields(
 
 
 @shared_task
-def delete(doc_ids: list[int]) -> Literal["OK"]:
+def delete(doc_ids: list[int], user: User | None = None) -> Literal["OK"]:
     try:
         root_ids = (
             Document.objects.filter(id__in=doc_ids, root_document__isnull=True)
@@ -352,19 +353,26 @@ def delete(doc_ids: list[int]) -> Literal["OK"]:
         )
         delete_ids = list({*doc_ids, *version_ids})
 
-        restricted_doc = (
-            Document.objects.filter(id__in=delete_ids)
-            .filter(
-                deleted_at__isnull=True,
-                delete_allowed_at__isnull=False,
-                delete_allowed_at__gt=timezone.localdate(),
+        if not (user and user.is_superuser):
+            restricted_doc = (
+                Document.objects.filter(id__in=delete_ids)
+                .filter(
+                    deleted_at__isnull=True,
+                    delete_allowed_at__isnull=False,
+                    delete_allowed_at__gt=timezone.localdate(),
+                )
+                .first()
             )
-            .first()
-        )
-        if restricted_doc is not None:
-            raise ValidationError(restricted_doc.get_delete_restriction_message())
+            if restricted_doc is not None:
+                raise ValidationError(restricted_doc.get_delete_restriction_message())
 
-        Document.objects.filter(id__in=delete_ids).delete()
+        documents_to_delete = list(Document.objects.filter(id__in=delete_ids))
+        if user and user.is_superuser:
+            for document in documents_to_delete:
+                SoftDeleteModel.delete(document)
+        else:
+            for document in documents_to_delete:
+                document.delete()
 
         from documents import index
 

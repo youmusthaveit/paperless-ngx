@@ -292,6 +292,20 @@ class ApplicationConfiguration(AbstractSingletonModel):
         max_length=48,
     )
 
+    remote_import_base_url = models.CharField(
+        verbose_name=_("Remote import base URL"),
+        null=True,
+        blank=True,
+        max_length=512,
+    )
+
+    remote_import_api_token = models.CharField(
+        verbose_name=_("Remote import API token"),
+        null=True,
+        blank=True,
+        max_length=255,
+    )
+
     app_logo = models.FileField(
         verbose_name=_("Application logo"),
         null=True,

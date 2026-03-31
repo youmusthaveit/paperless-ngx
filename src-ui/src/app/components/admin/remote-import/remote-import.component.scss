@@ -1,0 +1,64 @@
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.summary-grid div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.summary-grid span {
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+}
+
+.summary-grid strong {
+  font-size: 1.1rem;
+}
+
+.mapping-card {
+  height: 100%;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(246, 247, 244, 0.95));
+  border: 1px solid rgba(28, 40, 24, 0.08);
+}
+
+.mapping-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #51604c;
+}
+
+.mapping-stats {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.35rem 0;
+  color: #203125;
+}
+
+.task-result {
+  white-space: pre-wrap;
+}
+
+.remote-document-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.remote-document-link:hover {
+  color: var(--bs-primary);
+}
+
+@media (max-width: 767px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

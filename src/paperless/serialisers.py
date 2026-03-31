@@ -209,6 +209,11 @@ class ProfileSerializer(PasswordValidationMixin, serializers.ModelSerializer):
 class ApplicationConfigurationSerializer(serializers.ModelSerializer):
     user_args = serializers.JSONField(binary=True, allow_null=True)
     barcode_tag_mapping = serializers.JSONField(binary=True, allow_null=True)
+    remote_import_api_token = ObfuscatedPasswordField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
     llm_api_key = ObfuscatedPasswordField(
         required=False,
         allow_null=True,
@@ -242,6 +247,7 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
             elif len(data["llm_api_key"].replace("*", "")) == 0:
                 del data["llm_api_key"]
         nullable_string_fields = (
+            "remote_import_base_url",
             "documents_storage_prefix",
             "documents_s3_bucket",
             "documents_s3_endpoint_url",
@@ -266,11 +272,25 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
         for field in nullable_string_fields:
             if field in data and data[field] == "":
                 data[field] = None
+        if (
+            "remote_import_api_token" in data
+            and data["remote_import_api_token"] is not None
+        ):
+            if data["remote_import_api_token"] == "":
+                data["remote_import_api_token"] = None
+            elif len(data["remote_import_api_token"].replace("*", "")) == 0:
+                del data["remote_import_api_token"]
         return super().run_validation(data)
 
     def update(self, instance, validated_data):
         if instance.app_logo and "app_logo" in validated_data:
             instance.app_logo.delete()
+        if (
+            "remote_import_api_token" in validated_data
+            and validated_data["remote_import_api_token"]
+            and validated_data["remote_import_api_token"].replace("*", "") == ""
+        ):
+            validated_data.pop("remote_import_api_token")
         if (
             "documents_s3_secret_access_key" in validated_data
             and validated_data["documents_s3_secret_access_key"]
@@ -392,6 +412,61 @@ class ApplicationConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApplicationConfiguration
         fields = "__all__"
+
+
+class RemoteImportConnectionSerializer(serializers.Serializer):
+    base_url = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+    api_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        write_only=True,
+    )
+
+    def validate_base_url(self, value: str) -> str:
+        if not value:
+            return value
+        validate_outbound_http_url(value, allow_internal=True)
+        return value
+
+
+class RemoteImportBrowseSerializer(RemoteImportConnectionSerializer):
+    query = serializers.CharField(required=False, allow_blank=True, default="")
+    page = serializers.IntegerField(required=False, min_value=1, default=1)
+    page_size = serializers.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=200,
+        default=25,
+    )
+
+
+class RemoteImportStartSerializer(RemoteImportConnectionSerializer):
+    query = serializers.CharField(required=False, allow_blank=True, default="")
+    selected_document_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
+    import_all = serializers.BooleanField(required=False, default=False)
+    create_missing_items = serializers.BooleanField(required=False, default=True)
+    import_notes = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        import_all = attrs.get("import_all", False)
+        selected_document_ids = attrs.get("selected_document_ids") or []
+        if not import_all and not selected_document_ids:
+            raise serializers.ValidationError(
+                {
+                    "selected_document_ids": "Select documents to import or enable import_all.",
+                },
+            )
+        return attrs
 
 
 class S3StorageConfigurationSerializer(serializers.ModelSerializer):

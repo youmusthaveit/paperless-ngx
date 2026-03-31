@@ -478,7 +478,31 @@ class TestBulkEditAPI(DirectoriesMixin, APITestCase):
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
-        self.assertEqual(len(kwargs), 0)
+        self.assertEqual(kwargs["user"], self.user)
+
+    def test_superuser_can_bulk_delete_locked_documents(self) -> None:
+        Document.objects.filter(pk=self.doc1.pk).update(
+            delete_allowed_at=self.doc1.added.date().replace(
+                year=self.doc1.added.year + 1,
+            ),
+        )
+        Document.objects.filter(pk=self.doc2.pk).update(
+            delete_allowed_at=self.doc2.added.date().replace(
+                year=self.doc2.added.year + 1,
+            ),
+        )
+
+        response = self.client.post(
+            "/api/documents/delete/",
+            json.dumps({"documents": [self.doc1.id, self.doc2.id]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.doc1.refresh_from_db()
+        self.doc2.refresh_from_db()
+        self.assertIsNotNone(self.doc1.deleted_at)
+        self.assertIsNotNone(self.doc2.deleted_at)
 
     @mock.patch("documents.views.bulk_edit.reprocess")
     def test_reprocess_documents_endpoint(self, m) -> None:
