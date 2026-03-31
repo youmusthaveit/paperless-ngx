@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from django.utils import timezone
+from gotenberg_client import GotenbergClient
+from gotenberg_client.constants import A4
+from gotenberg_client.options import Measurement
+from gotenberg_client.options import MeasurementUnitType
+from gotenberg_client.options import PageMarginsType
 from lxml import html as lxml_html
 
 from documents import index
@@ -22,6 +27,8 @@ from documents.models import Document
 from documents.models import DocumentType
 from documents.models import StoragePath
 from documents.models import Tag
+from documents.parsers import ParseError
+from paperless import settings
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -157,6 +164,34 @@ def _ensure_document_bytes(document: Document, pdf_bytes: bytes) -> None:
 
 def _ensure_document_index(document: Document) -> None:
     index.add_or_update_document(document)
+
+
+def _render_html_to_pdf_bytes(html_path: Path) -> bytes:
+    if not settings.TIKA_GOTENBERG_ENDPOINT:
+        raise ParseError("Gotenberg endpoint is not configured.")
+
+    with (
+        GotenbergClient(
+            host=settings.TIKA_GOTENBERG_ENDPOINT,
+            timeout=settings.CELERY_TASK_TIME_LIMIT,
+        ) as client,
+        client.chromium.html_to_pdf() as route,
+    ):
+        response = (
+            route.index(html_path)
+            .margins(
+                PageMarginsType(
+                    top=Measurement(0.1, MeasurementUnitType.Inches),
+                    bottom=Measurement(0.1, MeasurementUnitType.Inches),
+                    left=Measurement(0.1, MeasurementUnitType.Inches),
+                    right=Measurement(0.1, MeasurementUnitType.Inches),
+                ),
+            )
+            .size(A4)
+            .scale(1.0)
+            .run()
+        )
+    return response.content
 
 
 def _html_to_display_lines(html_text: str) -> tuple[str, ...]:
@@ -584,7 +619,10 @@ def _upsert_document(
         html_path = Path(tmpdir) / Path(spec.filename).with_suffix(".html").name
         html_path.write_text(spec.content_html, encoding="utf-8")
         display_lines = _html_to_display_lines(html_path.read_text(encoding="utf-8"))
-        pdf_bytes = build_simple_pdf(list(display_lines))
+        try:
+            pdf_bytes = _render_html_to_pdf_bytes(html_path)
+        except Exception:
+            pdf_bytes = build_simple_pdf(list(display_lines))
         checksum = hashlib.sha256(pdf_bytes).hexdigest()
     defaults = {
         "title": spec.title,

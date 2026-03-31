@@ -1,4 +1,5 @@
 import json
+import tempfile
 import uuid
 from datetime import timedelta
 from io import BytesIO
@@ -6,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from celery import states
+from django.conf import settings
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -13,6 +15,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from documents.demo_data import _render_html_to_pdf_bytes
 from documents.demo_data import seed_handwerksbetrieb_demo_data
 from documents.models import Correspondent
 from documents.models import CustomField
@@ -1676,6 +1679,44 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             ).exists(),
         )
         self.assertTrue(invoice.source_exists())
+
+    def test_demo_pdf_generation_uses_gotenberg_html_to_pdf(self):
+        response = mock.Mock(content=b"%PDF-1.4 demo")
+        route = mock.MagicMock()
+        margins_route = route.index.return_value.margins.return_value
+        size_route = margins_route.size.return_value
+        scale_route = size_route.scale.return_value
+        scale_route.run.return_value = response
+        route_cm = mock.MagicMock()
+        route_cm.__enter__.return_value = route
+        client = mock.MagicMock()
+        client.chromium.html_to_pdf.return_value = route_cm
+        client_cm = mock.MagicMock()
+        client_cm.__enter__.return_value = client
+
+        with (
+            mock.patch("documents.demo_data.GotenbergClient", return_value=client_cm),
+            mock.patch.object(
+                settings,
+                "TIKA_GOTENBERG_ENDPOINT",
+                "http://gotenberg:3000",
+            ),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                html_path = Path(tmpdir) / "demo.html"
+                html_path.write_text(
+                    "<html><body><h1>Demo</h1></body></html>",
+                    encoding="utf-8",
+                )
+                pdf_bytes = _render_html_to_pdf_bytes(html_path)
+
+        self.assertEqual(pdf_bytes, b"%PDF-1.4 demo")
+        client.chromium.html_to_pdf.assert_called_once()
+        route.index.assert_called_once_with(html_path)
+        route.index.return_value.margins.assert_called_once()
+        margins_route.size.assert_called_once()
+        size_route.scale.assert_called_once()
+        scale_route.run.assert_called_once()
 
     def test_reset_runtime_data_deletes_custom_fields_and_workflow_children(self):
         owner = User.objects.create_superuser(username="reset-runtime-owner")
