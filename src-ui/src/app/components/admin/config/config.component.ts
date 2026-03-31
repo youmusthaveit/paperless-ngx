@@ -45,6 +45,7 @@ import {
 } from 'src/app/data/paperless-task'
 import { S3Storage, S3StorageExport } from 'src/app/data/s3-storage'
 import { ConfigService } from 'src/app/services/config.service'
+import { PermissionsService } from 'src/app/services/permissions.service'
 import { SettingsService } from 'src/app/services/settings.service'
 import { TasksService } from 'src/app/services/tasks.service'
 import { ToastService } from 'src/app/services/toast.service'
@@ -86,6 +87,7 @@ export class ConfigComponent
   private settingsService = inject(SettingsService)
   private tasksService = inject(TasksService)
   private modalService = inject(NgbModal)
+  public permissionsService = inject(PermissionsService)
 
   public readonly ConfigOptionType = ConfigOptionType
   public readonly ConfigCategory = ConfigCategory
@@ -104,10 +106,14 @@ export class ConfigComponent
   public loadingExportsStorageId: number | null = null
   public s3StorageExports: Record<number, S3StorageExport[]> = {}
   public s3TransferTasks: Record<number, PaperlessTask> = {}
+  public runtimeResetTask: PaperlessTask | null = null
+  public demoCraftsTask: PaperlessTask | null = null
   public s3StorageSelectItems: Array<{ id: number; name: string }> = []
   public backupJobsForm = new FormArray<FormGroup>([])
   private s3StorageModalRef: NgbModalRef | null = null
   private s3TransferPollingSubscriptions: Record<number, Subscription> = {}
+  private runtimeResetPollingSubscription: Subscription | null = null
+  private demoCraftsPollingSubscription: Subscription | null = null
   public s3StorageForm = new FormGroup({
     id: new FormControl<number | null>(null),
     name: new FormControl<string | null>(null),
@@ -176,6 +182,8 @@ export class ConfigComponent
           this.s3Storages = s3Storages
           this.refreshS3StorageChoices()
           this.initialize(config)
+          this.loadRuntimeResetTaskState()
+          this.loadDemoCraftsTaskState()
         },
         error: (e) => {
           this.loading = false
@@ -215,6 +223,8 @@ export class ConfigComponent
     Object.values(this.s3TransferPollingSubscriptions).forEach((subscription) =>
       subscription.unsubscribe()
     )
+    this.runtimeResetPollingSubscription?.unsubscribe()
+    this.demoCraftsPollingSubscription?.unsubscribe()
     this.unsubscribeNotifier.next(true)
     this.unsubscribeNotifier.complete()
   }
@@ -860,6 +870,261 @@ export class ConfigComponent
             $localize`An error occurred testing S3 backup storage`,
             e
           )
+        },
+      })
+  }
+
+  public get runtimeResetStatusText(): string | null {
+    if (!this.runtimeResetTask) {
+      return null
+    }
+
+    switch (this.runtimeResetTask.status) {
+      case PaperlessTaskStatus.Pending:
+        return $localize`Status: queued`
+      case PaperlessTaskStatus.Started:
+        return $localize`Status: running`
+      case PaperlessTaskStatus.Complete:
+        return $localize`Status: completed`
+      case PaperlessTaskStatus.Failed:
+        return $localize`Status: failed`
+      default:
+        return $localize`Status: unknown`
+    }
+  }
+
+  public get isRuntimeResetActive(): boolean {
+    return (
+      this.runtimeResetTask?.status === PaperlessTaskStatus.Pending ||
+      this.runtimeResetTask?.status === PaperlessTaskStatus.Started
+    )
+  }
+
+  public resetRuntimeData() {
+    const message = $localize`Delete all runtime data? This permanently removes documents, correspondents, tags, document types, storage paths, custom fields, saved views, workflows, share links, and previous task records. System configuration, users, mail accounts, and S3 settings remain untouched.`
+    if (!window.confirm(message)) {
+      return
+    }
+
+    this.configService
+      .resetRuntimeData(this.configForm.get('id')?.value)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.runtimeResetTask = {
+            id: 0,
+            type: PaperlessTaskType.ManualTask,
+            status: PaperlessTaskStatus.Pending,
+            acknowledged: false,
+            task_id: response.task_id,
+            task_file_name: 'Runtime data reset',
+            task_name: PaperlessTaskName.ResetRuntimeData,
+            date_created: new Date(),
+          }
+          this.watchRuntimeResetTask(response.task_id)
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.toastService.showError(
+            $localize`An error occurred starting the runtime data reset`,
+            e
+          )
+        },
+      })
+  }
+
+  public releaseRuntimeResetLock() {
+    if (
+      !window.confirm(
+        $localize`Release the runtime data reset lock? Use this only if a previous reset is stuck.`
+      )
+    ) {
+      return
+    }
+
+    this.configService
+      .releaseRuntimeResetLock(this.configForm.get('id')?.value)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.runtimeResetTask = null
+          this.runtimeResetPollingSubscription?.unsubscribe()
+          this.runtimeResetPollingSubscription = null
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.toastService.showError(
+            $localize`An error occurred releasing the runtime data reset lock`,
+            e
+          )
+        },
+      })
+  }
+
+  public seedDemoCraftsData() {
+    if (
+      !window.confirm(
+        $localize`Generate demo data for a classic crafts business? This adds sample correspondents, tags, document types, storage paths, custom fields, and a small set of believable documents.`
+      )
+    ) {
+      return
+    }
+
+    this.configService
+      .seedDemoCraftsData(this.configForm.get('id')?.value)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (response) => {
+          this.demoCraftsTask = {
+            id: 0,
+            type: PaperlessTaskType.ManualTask,
+            status: PaperlessTaskStatus.Pending,
+            acknowledged: false,
+            task_id: response.task_id,
+            task_file_name: 'Handwerksbetrieb Demo',
+            task_name: PaperlessTaskName.CreateDemoCraftsData,
+            date_created: new Date(),
+          }
+          this.watchDemoCraftsTask(response.task_id)
+          this.toastService.showInfo(response.detail)
+        },
+        error: (e) => {
+          this.toastService.showError(
+            $localize`An error occurred starting the demo data generation`,
+            e
+          )
+        },
+      })
+  }
+
+  public get demoCraftsStatusText(): string | null {
+    if (!this.demoCraftsTask) {
+      return null
+    }
+
+    switch (this.demoCraftsTask.status) {
+      case PaperlessTaskStatus.Pending:
+        return $localize`Status: queued`
+      case PaperlessTaskStatus.Started:
+        return $localize`Status: running`
+      case PaperlessTaskStatus.Complete:
+        return $localize`Status: completed`
+      case PaperlessTaskStatus.Failed:
+        return $localize`Status: failed`
+      default:
+        return $localize`Status: unknown`
+    }
+  }
+
+  public get isDemoCraftsActive(): boolean {
+    return (
+      this.demoCraftsTask?.status === PaperlessTaskStatus.Pending ||
+      this.demoCraftsTask?.status === PaperlessTaskStatus.Started
+    )
+  }
+
+  private loadRuntimeResetTaskState() {
+    if (!this.permissionsService.isSuperUser()) {
+      return
+    }
+
+    this.tasksService
+      .getByTaskName(PaperlessTaskName.ResetRuntimeData)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (tasks) => {
+          this.runtimeResetTask =
+            tasks?.find(
+              (task) =>
+                task.status === PaperlessTaskStatus.Pending ||
+                task.status === PaperlessTaskStatus.Started
+            ) ??
+            tasks?.[0] ??
+            null
+        },
+      })
+  }
+
+  private loadDemoCraftsTaskState() {
+    if (!this.permissionsService.isSuperUser()) {
+      return
+    }
+
+    this.tasksService
+      .getByTaskName(PaperlessTaskName.CreateDemoCraftsData)
+      .pipe(takeUntil(this.unsubscribeNotifier), first())
+      .subscribe({
+        next: (tasks) => {
+          this.demoCraftsTask =
+            tasks?.find(
+              (task) =>
+                task.status === PaperlessTaskStatus.Pending ||
+                task.status === PaperlessTaskStatus.Started
+            ) ??
+            tasks?.[0] ??
+            null
+        },
+      })
+  }
+
+  private watchDemoCraftsTask(taskId: string) {
+    this.demoCraftsPollingSubscription?.unsubscribe()
+    this.demoCraftsPollingSubscription = timer(0, 2000)
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        switchMap(() => this.tasksService.getByTaskId(taskId))
+      )
+      .subscribe({
+        next: (tasks) => {
+          const task = tasks?.[0]
+          if (!task) {
+            return
+          }
+
+          this.demoCraftsTask = task
+
+          if (
+            task.status === PaperlessTaskStatus.Complete ||
+            task.status === PaperlessTaskStatus.Failed
+          ) {
+            this.demoCraftsPollingSubscription?.unsubscribe()
+            this.demoCraftsPollingSubscription = null
+          }
+        },
+        error: () => {
+          this.demoCraftsPollingSubscription?.unsubscribe()
+          this.demoCraftsPollingSubscription = null
+        },
+      })
+  }
+
+  private watchRuntimeResetTask(taskId: string) {
+    this.runtimeResetPollingSubscription?.unsubscribe()
+    this.runtimeResetPollingSubscription = timer(0, 2000)
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        switchMap(() => this.tasksService.getByTaskId(taskId))
+      )
+      .subscribe({
+        next: (tasks) => {
+          const task = tasks?.[0]
+          if (!task) {
+            return
+          }
+
+          this.runtimeResetTask = task
+
+          if (
+            task.status === PaperlessTaskStatus.Complete ||
+            task.status === PaperlessTaskStatus.Failed
+          ) {
+            this.runtimeResetPollingSubscription?.unsubscribe()
+            this.runtimeResetPollingSubscription = null
+          }
+        },
+        error: () => {
+          this.runtimeResetPollingSubscription?.unsubscribe()
+          this.runtimeResetPollingSubscription = null
         },
       })
   }

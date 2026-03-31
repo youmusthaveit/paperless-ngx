@@ -669,6 +669,37 @@ class TestFileHandling(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
         # handler should have been called once via the async task
         self.assertEqual(m.call_count, 1)
 
+    @override_settings(FILENAME_FORMAT="{title}")
+    def test_update_filename_and_move_files_ignores_non_local_storage_paths(
+        self,
+    ) -> None:
+        doc = Document.objects.create(
+            title="document",
+            filename="document.pdf",
+            checksum="A",
+            mime_type="application/pdf",
+        )
+        doc.source_write_bytes(b"pdf")
+
+        with (
+            mock.patch(
+                "documents.signals.handlers.document_storage_is_local",
+                return_value=True,
+            ),
+            mock.patch.object(
+                Document,
+                "source_path",
+                new_callable=mock.PropertyMock,
+                side_effect=NotImplementedError,
+            ),
+        ):
+            doc.title = "document updated"
+            doc.save()
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.filename, "document updated.pdf")
+        self.assertTrue(doc.source_exists())
+
 
 class TestFileHandlingWithArchive(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
     @override_settings(FILENAME_FORMAT=None)

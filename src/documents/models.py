@@ -909,6 +909,11 @@ class PaperlessTask(ModelWithOwner):
         CHECK_SANITY = ("check_sanity", _("Check Sanity"))
         INDEX_OPTIMIZE = ("index_optimize", _("Index Optimize"))
         LLMINDEX_UPDATE = ("llmindex_update", _("LLM Index Update"))
+        RESET_RUNTIME_DATA = ("reset_runtime_data", _("Reset Runtime Data"))
+        CREATE_DEMO_CRAFTS_DATA = (
+            "create_demo_crafts_data",
+            _("Create Demo Crafts Data"),
+        )
         EXPORT_S3_STORAGE = ("export_s3_storage", _("Export S3 Storage"))
         IMPORT_S3_STORAGE = ("import_s3_storage", _("Import S3 Storage"))
         SCHEDULED_BACKUP_S3_STORAGE = (

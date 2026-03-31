@@ -66,4 +66,31 @@ describe('ConfigService', () => {
     )
     expect(req.request.body).toEqual({ id: 1 })
   })
+
+  it('should call correct API endpoint on reset runtime data', () => {
+    service.resetRuntimeData(1).subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}config/1/reset-runtime-data/`
+    )
+    expect(req.request.method).toEqual('POST')
+    expect(req.request.body).toEqual({})
+  })
+
+  it('should call correct API endpoint on seed demo crafts data', () => {
+    service.seedDemoCraftsData(1).subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}config/1/seed-demo-crafts-data/`
+    )
+    expect(req.request.method).toEqual('POST')
+    expect(req.request.body).toEqual({})
+  })
+
+  it('should call correct API endpoint on release runtime reset lock', () => {
+    service.releaseRuntimeResetLock(1).subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}config/1/release-runtime-reset-lock/`
+    )
+    expect(req.request.method).toEqual('POST')
+    expect(req.request.body).toEqual({})
+  })
 })

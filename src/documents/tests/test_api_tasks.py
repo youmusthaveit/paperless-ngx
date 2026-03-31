@@ -4,6 +4,7 @@ from unittest import mock
 import celery
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -109,6 +110,88 @@ class TestTasks(DirectoriesMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 0)
+
+    def test_get_running_tasks(self) -> None:
+        running_task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="running.pdf",
+            status=celery.states.STARTED,
+        )
+        queued_task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="queued.pdf",
+            status=celery.states.PENDING,
+        )
+        _ = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="done.pdf",
+            status=celery.states.SUCCESS,
+        )
+
+        response = self.client.get(self.ENDPOINT + "?running=true")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            {item["task_id"] for item in response.data},
+            {running_task.task_id, queued_task.task_id},
+        )
+
+    def test_reset_running_tasks(self) -> None:
+        pending_task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="queued.pdf",
+            status=celery.states.PENDING,
+        )
+        started_task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="running.pdf",
+            status=celery.states.STARTED,
+            date_started=timezone.now(),
+        )
+        finished_task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="done.pdf",
+            status=celery.states.SUCCESS,
+            result="Success. New document id 1 created",
+        )
+
+        response = self.client.post(
+            self.ENDPOINT + "reset/",
+            {"tasks": [pending_task.id, started_task.id, finished_task.id]},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"result": 2})
+
+        pending_task.refresh_from_db()
+        started_task.refresh_from_db()
+        finished_task.refresh_from_db()
+
+        self.assertEqual(pending_task.status, celery.states.FAILURE)
+        self.assertEqual(started_task.status, celery.states.FAILURE)
+        self.assertEqual(finished_task.status, celery.states.SUCCESS)
+
+    def test_reset_running_tasks_requires_superuser(self) -> None:
+        regular_user = User.objects.create_user(username="regular")
+        regular_user.user_permissions.add(
+            Permission.objects.get(codename="view_paperlesstask"),
+            Permission.objects.get(codename="change_paperlesstask"),
+        )
+        self.client.force_authenticate(user=regular_user)
+
+        task = PaperlessTask.objects.create(
+            task_id=str(uuid.uuid4()),
+            task_file_name="running.pdf",
+            status=celery.states.STARTED,
+        )
+
+        response = self.client.post(
+            self.ENDPOINT + "reset/",
+            {"tasks": [task.id]},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_acknowledge_tasks(self) -> None:
         """

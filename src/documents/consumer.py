@@ -275,63 +275,68 @@ class ConsumerPlugin(
             f"Executing post-consume script {settings.POST_CONSUME_SCRIPT}",
         )
 
-        script_env = os.environ.copy()
+        with document.local_source_path() as source_path:
+            script_env = os.environ.copy()
 
-        script_env["DOCUMENT_ID"] = str(document.pk)
-        script_env["DOCUMENT_TYPE"] = str(document.document_type)
-        script_env["DOCUMENT_CREATED"] = str(document.created)
-        script_env["DOCUMENT_MODIFIED"] = str(document.modified)
-        script_env["DOCUMENT_ADDED"] = str(document.added)
-        script_env["DOCUMENT_FILE_NAME"] = document.get_public_filename()
-        script_env["DOCUMENT_SOURCE_PATH"] = os.path.normpath(document.source_path)
-        script_env["DOCUMENT_ARCHIVE_PATH"] = os.path.normpath(
-            str(document.archive_path),
-        )
-        script_env["DOCUMENT_THUMBNAIL_PATH"] = os.path.normpath(
-            document.thumbnail_path,
-        )
-        script_env["DOCUMENT_DOWNLOAD_URL"] = reverse(
-            "document-download",
-            kwargs={"pk": document.pk},
-        )
-        script_env["DOCUMENT_THUMBNAIL_URL"] = reverse(
-            "document-thumb",
-            kwargs={"pk": document.pk},
-        )
-        script_env["DOCUMENT_OWNER"] = (
-            document.owner.get_username() if document.owner else ""
-        )
-        script_env["DOCUMENT_CORRESPONDENT"] = str(document.correspondent)
-        script_env["DOCUMENT_TAGS"] = str(
-            ",".join(document.tags.all().values_list("name", flat=True)),
-        )
-        script_env["DOCUMENT_ORIGINAL_FILENAME"] = str(document.original_filename)
-        script_env["TASK_ID"] = self.task_id or ""
-
-        try:
-            run_subprocess(
-                [
-                    settings.POST_CONSUME_SCRIPT,
-                    str(document.pk),
-                    document.get_public_filename(),
-                    os.path.normpath(document.source_path),
-                    os.path.normpath(document.thumbnail_path),
-                    reverse("document-download", kwargs={"pk": document.pk}),
-                    reverse("document-thumb", kwargs={"pk": document.pk}),
-                    str(document.correspondent),
-                    str(",".join(document.tags.all().values_list("name", flat=True))),
-                ],
-                script_env,
-                self.log,
+            script_env["DOCUMENT_ID"] = str(document.pk)
+            script_env["DOCUMENT_TYPE"] = str(document.document_type)
+            script_env["DOCUMENT_CREATED"] = str(document.created)
+            script_env["DOCUMENT_MODIFIED"] = str(document.modified)
+            script_env["DOCUMENT_ADDED"] = str(document.added)
+            script_env["DOCUMENT_FILE_NAME"] = document.get_public_filename()
+            script_env["DOCUMENT_SOURCE_PATH"] = os.path.normpath(source_path)
+            script_env["DOCUMENT_ARCHIVE_PATH"] = os.path.normpath(
+                str(document.archive_path),
             )
-
-        except Exception as e:
-            self._fail(
-                ConsumerStatusShortMessage.POST_CONSUME_SCRIPT_ERROR,
-                f"Error while executing post-consume script: {e}",
-                exc_info=True,
-                exception=e,
+            script_env["DOCUMENT_THUMBNAIL_PATH"] = os.path.normpath(
+                document.thumbnail_path,
             )
+            script_env["DOCUMENT_DOWNLOAD_URL"] = reverse(
+                "document-download",
+                kwargs={"pk": document.pk},
+            )
+            script_env["DOCUMENT_THUMBNAIL_URL"] = reverse(
+                "document-thumb",
+                kwargs={"pk": document.pk},
+            )
+            script_env["DOCUMENT_OWNER"] = (
+                document.owner.get_username() if document.owner else ""
+            )
+            script_env["DOCUMENT_CORRESPONDENT"] = str(document.correspondent)
+            script_env["DOCUMENT_TAGS"] = str(
+                ",".join(document.tags.all().values_list("name", flat=True)),
+            )
+            script_env["DOCUMENT_ORIGINAL_FILENAME"] = str(document.original_filename)
+            script_env["TASK_ID"] = self.task_id or ""
+
+            try:
+                run_subprocess(
+                    [
+                        settings.POST_CONSUME_SCRIPT,
+                        str(document.pk),
+                        document.get_public_filename(),
+                        os.path.normpath(source_path),
+                        os.path.normpath(document.thumbnail_path),
+                        reverse("document-download", kwargs={"pk": document.pk}),
+                        reverse("document-thumb", kwargs={"pk": document.pk}),
+                        str(document.correspondent),
+                        str(
+                            ",".join(
+                                document.tags.all().values_list("name", flat=True),
+                            ),
+                        ),
+                    ],
+                    script_env,
+                    self.log,
+                )
+
+            except Exception as e:
+                self._fail(
+                    ConsumerStatusShortMessage.POST_CONSUME_SCRIPT_ERROR,
+                    f"Error while executing post-consume script: {e}",
+                    exc_info=True,
+                    exception=e,
+                )
 
     def run(self) -> str:
         """

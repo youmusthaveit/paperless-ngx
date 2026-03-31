@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -18,6 +19,7 @@ from django.contrib.auth.models import User
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import FileResponse
 from django.http import HttpResponseBadRequest
@@ -52,9 +54,11 @@ from documents.storage import test_s3_connection
 from documents.tasks import AUTOMATIC_S3_TRANSFER_LOCATION
 from documents.tasks import MANUAL_S3_TRANSFER_LOCATION
 from documents.tasks import build_manual_s3_export_filename
+from documents.tasks import create_demo_crafts_data
 from documents.tasks import export_documents_to_s3_storage
 from documents.tasks import import_documents_from_s3_storage
 from documents.tasks import llmindex_index
+from documents.tasks import reset_runtime_data
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.models import ApplicationConfiguration
@@ -699,6 +703,37 @@ class ApplicationConfigurationViewSet(ModelViewSet):
         if isinstance(secret, str) and secret and secret.replace("*", "") == "":
             overrides[key] = getattr(config, key)
 
+    def _mark_stale_runtime_reset_tasks(self) -> None:
+        now = timezone.now()
+        stale_before = now - timedelta(minutes=15)
+        stale_tasks = PaperlessTask.objects.filter(
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status__in={states.PENDING, states.STARTED},
+        ).filter(
+            Q(date_started__lt=stale_before)
+            | Q(date_started__isnull=True, date_created__lt=stale_before),
+        )
+        stale_tasks.update(
+            status=states.FAILURE,
+            result=(
+                "Task marked as failed because it stopped updating before a new "
+                "runtime data reset was requested."
+            ),
+            date_done=now,
+        )
+
+    def _release_runtime_reset_tasks(self, *, reason: str) -> int:
+        now = timezone.now()
+        released = PaperlessTask.objects.filter(
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status__in={states.PENDING, states.STARTED},
+        ).update(
+            status=states.FAILURE,
+            result=reason,
+            date_done=now,
+        )
+        return released
+
     @action(detail=True, methods=["post"], url_path="test-s3-storage")
     def test_s3_storage(self, request, *args, **kwargs):
         config = self.get_object()
@@ -793,6 +828,112 @@ class ApplicationConfigurationViewSet(ModelViewSet):
         )
         response._resource_closers.append(temp_dir.cleanup)
         return response
+
+    @action(detail=True, methods=["post"], url_path="reset-runtime-data")
+    def reset_runtime_data_action(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        self._mark_stale_runtime_reset_tasks()
+
+        if PaperlessTask.objects.filter(
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status__in={states.PENDING, states.STARTED},
+        ).exists():
+            raise ValidationError(
+                {"detail": "A runtime data reset is already running."},
+            )
+
+        task_id = str(uuid4())
+
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=task_id,
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status=states.PENDING,
+            date_created=timezone.now(),
+            task_file_name="Runtime data reset",
+            owner=request.user
+            if request.user and request.user.is_authenticated
+            else None,
+        )
+
+        reset_runtime_data.apply_async(
+            kwargs={
+                "owner_id": request.user.id if request.user.is_authenticated else None,
+            },
+            task_id=task_id,
+        )
+
+        return Response(
+            {
+                "detail": "Runtime data reset started.",
+                "task_id": task_id,
+            },
+        )
+
+    @action(detail=True, methods=["post"], url_path="release-runtime-reset-lock")
+    def release_runtime_reset_lock(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        released = self._release_runtime_reset_tasks(
+            reason=(
+                "Task lock manually released by a superuser before starting a new "
+                "runtime data reset."
+            ),
+        )
+        return Response(
+            {
+                "detail": (
+                    "Runtime data reset lock released."
+                    if released
+                    else "No runtime data reset lock was active."
+                ),
+                "released_tasks": released,
+            },
+        )
+
+    @action(detail=True, methods=["post"], url_path="seed-demo-crafts-data")
+    def seed_demo_crafts_data(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        if PaperlessTask.objects.filter(
+            task_name=PaperlessTask.TaskName.CREATE_DEMO_CRAFTS_DATA,
+            status__in={states.PENDING, states.STARTED},
+        ).exists():
+            raise ValidationError(
+                {"detail": "Demo data generation is already running."},
+            )
+
+        task_id = str(uuid4())
+
+        PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=task_id,
+            task_name=PaperlessTask.TaskName.CREATE_DEMO_CRAFTS_DATA,
+            status=states.PENDING,
+            date_created=timezone.now(),
+            task_file_name="Handwerksbetrieb Demo",
+            owner=request.user
+            if request.user and request.user.is_authenticated
+            else None,
+        )
+
+        create_demo_crafts_data.apply_async(
+            kwargs={
+                "owner_id": request.user.id if request.user.is_authenticated else None,
+            },
+            task_id=task_id,
+        )
+
+        return Response(
+            {
+                "detail": "Demo data generation started.",
+                "task_id": task_id,
+            },
+        )
 
     @action(detail=True, methods=["post"], url_path="remote-import-inspect")
     def remote_import_inspect(self, request, *args, **kwargs):

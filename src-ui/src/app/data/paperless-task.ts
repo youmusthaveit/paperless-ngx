@@ -14,6 +14,8 @@ export enum PaperlessTaskName {
   SanityCheck = 'check_sanity',
   IndexOptimize = 'index_optimize',
   LLMIndexUpdate = 'llmindex_update',
+  ResetRuntimeData = 'reset_runtime_data',
+  CreateDemoCraftsData = 'create_demo_crafts_data',
   ExportS3Storage = 'export_s3_storage',
   ImportS3Storage = 'import_s3_storage',
 }

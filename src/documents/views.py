@@ -3794,6 +3794,15 @@ class TasksViewSet(ReadOnlyModelViewSet):
         task_id = self.request.query_params.get("task_id")
         if task_id is not None:
             queryset = PaperlessTask.objects.filter(task_id=task_id)
+        elif self.request.query_params.get("running") in {
+            "1",
+            "true",
+            "True",
+            "yes",
+        }:
+            queryset = queryset.filter(
+                status__in={states.PENDING, states.STARTED},
+            )
         return queryset
 
     @action(
@@ -3812,6 +3821,35 @@ class TasksViewSet(ReadOnlyModelViewSet):
                 tasks = tasks.filter(owner=request.user) | tasks.filter(owner=None)
             result = tasks.update(
                 acknowledged=True,
+            )
+            return Response({"result": result})
+        except Exception:
+            return HttpResponseBadRequest()
+
+    @action(
+        methods=["post"],
+        detail=False,
+        permission_classes=[IsAuthenticated],
+    )
+    def reset(self, request):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        serializer = AcknowledgeTasksViewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task_ids = serializer.validated_data.get("tasks")
+
+        try:
+            now = timezone.now()
+            tasks = PaperlessTask.objects.filter(
+                id__in=task_ids,
+                status__in={states.PENDING, states.STARTED},
+            )
+            result = tasks.update(
+                acknowledged=False,
+                status=states.FAILURE,
+                date_done=now,
+                result="Task manually reset by a superuser.",
             )
             return Response({"result": result})
         except Exception:

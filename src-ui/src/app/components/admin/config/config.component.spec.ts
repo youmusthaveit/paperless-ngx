@@ -1,4 +1,9 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing'
+import {
+  ComponentFixture,
+  TestBed,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing'
 
 import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
 import { provideHttpClientTesting } from '@angular/common/http/testing'
@@ -9,8 +14,11 @@ import { NgSelectModule } from '@ng-select/ng-select'
 import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
 import { of, throwError } from 'rxjs'
 import { OutputTypeConfig } from 'src/app/data/paperless-config'
+import { PaperlessTaskStatus } from 'src/app/data/paperless-task'
 import { ConfigService } from 'src/app/services/config.service'
+import { PermissionsService } from 'src/app/services/permissions.service'
 import { SettingsService } from 'src/app/services/settings.service'
+import { TasksService } from 'src/app/services/tasks.service'
 import { ToastService } from 'src/app/services/toast.service'
 import { FileComponent } from '../../common/input/file/file.component'
 import { NumberComponent } from '../../common/input/number/number.component'
@@ -24,8 +32,10 @@ describe('ConfigComponent', () => {
   let component: ConfigComponent
   let fixture: ComponentFixture<ConfigComponent>
   let configService: ConfigService
+  let tasksService: TasksService
   let toastService: ToastService
   let settingService: SettingsService
+  let permissionsService: PermissionsService
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -51,8 +61,19 @@ describe('ConfigComponent', () => {
     }).compileComponents()
 
     configService = TestBed.inject(ConfigService)
+    tasksService = TestBed.inject(TasksService)
     toastService = TestBed.inject(ToastService)
     settingService = TestBed.inject(SettingsService)
+    permissionsService = TestBed.inject(PermissionsService)
+    permissionsService.initialize([], {
+      id: 1,
+      username: 'admin',
+      is_superuser: true,
+      is_staff: true,
+      groups: [],
+      user_permissions: [],
+    } as any)
+    jest.spyOn(tasksService, 'getByTaskName').mockReturnValue(of([]))
     fixture = TestBed.createComponent(ConfigComponent)
     component = fixture.componentInstance
     fixture.detectChanges()
@@ -159,5 +180,91 @@ describe('ConfigComponent', () => {
     component.configForm.patchValue({ barcodes_enabled: true })
     component.resetOption('barcodes_enabled')
     expect(component.configForm.get('barcodes_enabled').value).toBeNull()
+  })
+
+  it('should start runtime data reset and poll for task status', fakeAsync(() => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    jest
+      .spyOn(configService, 'resetRuntimeData')
+      .mockReturnValue(
+        of({ detail: 'Runtime data reset started.', task_id: 'task-1' })
+      )
+    jest.spyOn(tasksService, 'getByTaskId').mockReturnValue(
+      of([
+        {
+          task_id: 'task-1',
+          status: PaperlessTaskStatus.Complete,
+          task_name: 'reset_runtime_data',
+          acknowledged: false,
+          type: 'manual_task',
+          date_created: new Date(),
+          result: 'done',
+        } as any,
+      ])
+    )
+
+    component.configForm.patchValue({ id: 1 })
+    component.resetRuntimeData()
+    tick(0)
+
+    expect(configService.resetRuntimeData).toHaveBeenCalledWith(1)
+    expect(component.runtimeResetTask?.status).toEqual(
+      PaperlessTaskStatus.Complete
+    )
+  }))
+
+  it('should start demo crafts data generation and poll for task status', fakeAsync(() => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    jest
+      .spyOn(configService, 'seedDemoCraftsData')
+      .mockReturnValue(
+        of({ detail: 'Demo data generation started.', task_id: 'task-2' })
+      )
+    jest.spyOn(tasksService, 'getByTaskId').mockReturnValue(
+      of([
+        {
+          task_id: 'task-2',
+          status: PaperlessTaskStatus.Complete,
+          task_name: 'create_demo_crafts_data',
+          acknowledged: false,
+          type: 'manual_task',
+          date_created: new Date(),
+          result: 'done',
+        } as any,
+      ])
+    )
+
+    component.configForm.patchValue({ id: 1 })
+    component.seedDemoCraftsData()
+    tick(0)
+
+    expect(configService.seedDemoCraftsData).toHaveBeenCalledWith(1)
+    expect(component.demoCraftsTask?.status).toEqual(
+      PaperlessTaskStatus.Complete
+    )
+  }))
+
+  it('should release runtime data reset lock', () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    jest
+      .spyOn(configService, 'releaseRuntimeResetLock')
+      .mockReturnValue(
+        of({ detail: 'Runtime data reset lock released.', released_tasks: 1 })
+      )
+
+    component.configForm.patchValue({ id: 1 })
+    component.runtimeResetTask = {
+      task_id: 'task-1',
+      status: PaperlessTaskStatus.Pending,
+      task_name: 'reset_runtime_data',
+      acknowledged: false,
+      type: 'manual_task',
+      date_created: new Date(),
+    } as any
+
+    component.releaseRuntimeResetLock()
+
+    expect(configService.releaseRuntimeResetLock).toHaveBeenCalledWith(1)
+    expect(component.runtimeResetTask).toBeNull()
   })
 })

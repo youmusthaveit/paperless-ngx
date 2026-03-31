@@ -14,10 +14,14 @@ from django.utils import timezone
 
 from documents import tasks
 from documents.models import Correspondent
+from documents.models import CustomField
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import PaperlessTask
 from documents.models import Tag
+from documents.models import Workflow
+from documents.models import WorkflowAction
+from documents.models import WorkflowTrigger
 from documents.sanity_checker import SanityCheckFailedException
 from documents.sanity_checker import SanityCheckMessages
 from documents.tests.test_classifier import dummy_preprocess
@@ -618,6 +622,76 @@ class TestEmptyTrashTask(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
 
         tasks.empty_trash()
         self.assertEqual(Document.global_objects.count(), 0)
+
+
+class TestResetRuntimeData(DirectoriesMixin, TestCase):
+    def test_reset_runtime_data_deletes_custom_fields_linked_to_document_types(
+        self,
+    ) -> None:
+        custom_field = CustomField.objects.create(
+            name="Auftragsnummer",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        document_type = DocumentType.objects.create(name="Rechnung")
+        document_type.custom_fields.add(custom_field)
+        task = PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id="reset-runtime-data-test",
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status=states.PENDING,
+            date_created=timezone.now(),
+        )
+
+        tasks.reset_runtime_data.push_request(id="reset-runtime-data-test")
+        try:
+            result = tasks.reset_runtime_data.run(owner_id=None)
+        finally:
+            tasks.reset_runtime_data.pop_request()
+
+        self.assertIn("Runtime data reset completed.", result)
+        self.assertEqual(DocumentType.objects.count(), 0)
+        self.assertEqual(CustomField.objects.count(), 0)
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.SUCCESS)
+
+    def test_reset_runtime_data_deletes_custom_fields_linked_to_workflows(
+        self,
+    ) -> None:
+        custom_field = CustomField.objects.create(
+            name="Pruefdatum",
+            data_type=CustomField.FieldDataType.DATE,
+        )
+        trigger = WorkflowTrigger.objects.create(
+            schedule_date_custom_field=custom_field,
+        )
+        action = WorkflowAction.objects.create()
+        action.assign_custom_fields.add(custom_field)
+        workflow = Workflow.objects.create(name="Demo Workflow")
+        workflow.triggers.add(trigger)
+        workflow.actions.add(action)
+        task = PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id="reset-runtime-data-workflow-test",
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status=states.PENDING,
+            date_created=timezone.now(),
+        )
+
+        tasks.reset_runtime_data.push_request(
+            id="reset-runtime-data-workflow-test",
+        )
+        try:
+            result = tasks.reset_runtime_data.run(owner_id=None)
+        finally:
+            tasks.reset_runtime_data.pop_request()
+
+        self.assertIn("Runtime data reset completed.", result)
+        self.assertEqual(Workflow.objects.count(), 0)
+        self.assertEqual(WorkflowTrigger.objects.count(), 0)
+        self.assertEqual(WorkflowAction.objects.count(), 0)
+        self.assertEqual(CustomField.objects.count(), 0)
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.SUCCESS)
 
 
 class TestUpdateContent(DirectoriesMixin, TestCase):

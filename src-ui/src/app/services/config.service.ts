@@ -163,6 +163,39 @@ export class ConfigService {
       .pipe(first())
   }
 
+  resetRuntimeData(
+    configId: number
+  ): Observable<{ detail: string; task_id: string }> {
+    return this.http
+      .post<{
+        detail: string
+        task_id: string
+      }>(`${this.baseUrl}${configId}/reset-runtime-data/`, {})
+      .pipe(first())
+  }
+
+  seedDemoCraftsData(
+    configId: number
+  ): Observable<{ detail: string; task_id: string }> {
+    return this.http
+      .post<{
+        detail: string
+        task_id: string
+      }>(`${this.baseUrl}${configId}/seed-demo-crafts-data/`, {})
+      .pipe(first())
+  }
+
+  releaseRuntimeResetLock(
+    configId: number
+  ): Observable<{ detail: string; released_tasks: number }> {
+    return this.http
+      .post<{
+        detail: string
+        released_tasks: number
+      }>(`${this.baseUrl}${configId}/release-runtime-reset-lock/`, {})
+      .pipe(first())
+  }
+
   downloadS3StorageExport(
     storageId: number,
     exportName: string

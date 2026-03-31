@@ -17,6 +17,8 @@ import {
   filter,
   first,
   Subject,
+  Subscription,
+  switchMap,
   takeUntil,
   timer,
 } from 'rxjs'
@@ -77,12 +79,16 @@ export class TasksComponent
 
   public activeTab: TaskTab = TaskTab.Failed
   public importActiveTab: TaskTab = TaskTab.Failed
+  public runningTasks: PaperlessTask[] = []
   public selectedTasks: Set<number> = new Set()
   public selectedImportTasks: Set<number> = new Set()
+  public selectedRunningTasks: Set<number> = new Set()
   public togggleAll: boolean = false
   public toggleAllImports: boolean = false
+  public toggleAllRunningTasks: boolean = false
   public expandedTask: number
   public expandedImportTask: number
+  public expandedRunningTask: number
 
   public pageSize: number = 25
   public page: number = 1
@@ -91,6 +97,7 @@ export class TasksComponent
   public autoRefreshEnabled: boolean = true
 
   private _filterText: string = ''
+  private runningTasksPollingSubscription: Subscription | null = null
   get filterText() {
     return this._filterText
   }
@@ -122,8 +129,15 @@ export class TasksComponent
       : $localize`Dismiss all`
   }
 
+  get resetRunningButtonText(): string {
+    return this.selectedRunningTasks.size > 0
+      ? $localize`Reset selected`
+      : $localize`Reset all`
+  }
+
   ngOnInit() {
     this.tasksService.reload()
+    this.loadRunningTasks()
     timer(5000, 5000)
       .pipe(
         filter(() => this.autoRefreshEnabled),
@@ -131,6 +145,7 @@ export class TasksComponent
       )
       .subscribe(() => {
         this.tasksService.reload()
+        this.loadRunningTasks()
       })
 
     this.filterDebounce
@@ -146,6 +161,7 @@ export class TasksComponent
   ngOnDestroy() {
     super.ngOnDestroy()
     this.tasksService.cancelPending()
+    this.runningTasksPollingSubscription?.unsubscribe()
   }
 
   dismissTask(task: PaperlessTask, taskGroup: 'file' | 'import' = 'file') {
@@ -215,6 +231,15 @@ export class TasksComponent
       : selectedTasks.add(task.id)
   }
 
+  toggleRunningSelected(task: PaperlessTask) {
+    this.selectedRunningTasks.has(task.id)
+      ? this.selectedRunningTasks.delete(task.id)
+      : this.selectedRunningTasks.add(task.id)
+    this.toggleAllRunningTasks =
+      this.currentRunningTasks.length > 0 &&
+      this.selectedRunningTasks.size === this.currentRunningTasks.length
+  }
+
   get currentTasks(): PaperlessTask[] {
     let tasks: PaperlessTask[] = this.tasksForTab(this.activeTab, 'file')
     if (this._filterText.length) {
@@ -235,6 +260,10 @@ export class TasksComponent
     return this.tasksForTab(this.importActiveTab, 'import')
   }
 
+  get currentRunningTasks(): PaperlessTask[] {
+    return this.runningTasks
+  }
+
   toggleAll(event: PointerEvent, taskGroup: 'file' | 'import' = 'file') {
     if ((event.target as HTMLInputElement).checked) {
       if (taskGroup === 'file') {
@@ -251,6 +280,17 @@ export class TasksComponent
     }
   }
 
+  toggleAllRunning(event: PointerEvent) {
+    if ((event.target as HTMLInputElement).checked) {
+      this.toggleAllRunningTasks = true
+      this.selectedRunningTasks = new Set(
+        this.currentRunningTasks.map((t) => t.id)
+      )
+    } else {
+      this.clearRunningSelection()
+    }
+  }
+
   clearSelection(taskGroup: 'file' | 'import' = 'file') {
     if (taskGroup === 'file') {
       this.togggleAll = false
@@ -259,6 +299,11 @@ export class TasksComponent
       this.toggleAllImports = false
       this.selectedImportTasks.clear()
     }
+  }
+
+  clearRunningSelection() {
+    this.toggleAllRunningTasks = false
+    this.selectedRunningTasks.clear()
   }
 
   duringTabChange(taskGroup: 'file' | 'import' = 'file') {
@@ -301,6 +346,10 @@ export class TasksComponent
     this._filterText = ''
   }
 
+  public formatTaskName(taskName: string | null | undefined): string {
+    return taskName ? taskName.split('_').join(' ') : $localize`Unknown`
+  }
+
   filterInputKeyup(event: KeyboardEvent) {
     if (event.key == 'Enter') {
       this._filterText = (event.target as HTMLInputElement).value
@@ -311,6 +360,10 @@ export class TasksComponent
 
   private getSelection(taskGroup: 'file' | 'import'): Set<number> {
     return taskGroup === 'file' ? this.selectedTasks : this.selectedImportTasks
+  }
+
+  private getRunningSelection(): Set<number> {
+    return this.selectedRunningTasks
   }
 
   private getAllTasks(taskGroup: 'file' | 'import'): PaperlessTask[] {
@@ -346,5 +399,63 @@ export class TasksComponent
       case TaskTab.Failed:
         return this.tasksService.failedImportFileTasks
     }
+  }
+
+  private loadRunningTasks() {
+    this.runningTasksPollingSubscription?.unsubscribe()
+    this.runningTasksPollingSubscription = timer(0, 5000)
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        switchMap(() => this.tasksService.getRunningTasks())
+      )
+      .subscribe({
+        next: (tasks) => {
+          this.runningTasks = tasks ?? []
+          const activeSelection = new Set(
+            this.runningTasks.map((task) => task.id)
+          )
+          this.selectedRunningTasks = new Set(
+            [...this.selectedRunningTasks].filter((id) =>
+              activeSelection.has(id)
+            )
+          )
+          this.toggleAllRunningTasks =
+            this.currentRunningTasks.length > 0 &&
+            this.selectedRunningTasks.size === this.currentRunningTasks.length
+        },
+        error: () => {
+          this.runningTasksPollingSubscription?.unsubscribe()
+          this.runningTasksPollingSubscription = null
+        },
+      })
+  }
+
+  public resetRunningTasks(task?: PaperlessTask) {
+    const tasks = task
+      ? new Set([task.id])
+      : new Set(this.getRunningSelection().values())
+    if (!task && tasks.size == 0) {
+      for (const runningTask of this.currentRunningTasks) {
+        tasks.add(runningTask.id)
+      }
+    }
+    if (tasks.size == 0) return
+
+    const message =
+      tasks.size > 1
+        ? $localize`Reset all ${tasks.size} running tasks?`
+        : $localize`Reset this running task?`
+    if (!window.confirm(message)) {
+      return
+    }
+
+    this.tasksService.resetTasks(tasks).subscribe({
+      next: () => {
+        this.clearRunningSelection()
+        this.loadRunningTasks()
+      },
+      error: (e) =>
+        this.toastService.showError($localize`Error resetting tasks`, e),
+    })
   }
 }

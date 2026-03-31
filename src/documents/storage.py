@@ -4,8 +4,8 @@ import hashlib
 import shutil
 import uuid
 from contextlib import contextmanager
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -513,7 +513,7 @@ def document_modified_time(kind: str, name: str | None):
         return None
     local_path = _local_document_path(kind, str(name))
     if local_path.exists():
-        return datetime.fromtimestamp(local_path.stat().st_mtime, tz=timezone.utc)
+        return datetime.fromtimestamp(local_path.stat().st_mtime, tz=UTC)
     storage = _find_document_storage(kind, name) or get_document_storage(kind)
     return storage.get_modified_time(str(name))
 
@@ -572,13 +572,6 @@ def document_move(kind: str, old_name: str, new_name: str) -> None:
     if local_source_path.exists():
         local_target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(local_source_path, local_target_path)
-        return
-
-    if _supports_local_path(storage):
-        source_path = document_storage_path(kind, old_name)
-        target_path = document_storage_path(kind, new_name)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(source_path, target_path)
         return
 
     with storage.open(old_name, "rb") as handle:

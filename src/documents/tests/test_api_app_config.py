@@ -1,16 +1,31 @@
 import json
 import uuid
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
 from celery import states
+from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from documents.demo_data import seed_handwerksbetrieb_demo_data
+from documents.models import Correspondent
+from documents.models import CustomField
+from documents.models import CustomFieldInstance
+from documents.models import Document
+from documents.models import DocumentType
 from documents.models import PaperlessTask
+from documents.models import StoragePath
+from documents.models import Tag
+from documents.models import Workflow
+from documents.models import WorkflowAction
+from documents.models import WorkflowTrigger
+from documents.tasks import reset_runtime_data
 from documents.tests.utils import DirectoriesMixin
 from paperless.models import ApplicationConfiguration
 from paperless.models import ColorConvertChoices
@@ -24,8 +39,8 @@ class TestApiAppConfig(DirectoriesMixin, APITestCase):
     def setUp(self) -> None:
         super().setUp()
 
-        user = User.objects.create_superuser(username="temp_admin")
-        self.client.force_authenticate(user=user)
+        self.user = User.objects.create_superuser(username="temp_admin")
+        self.client.force_authenticate(user=self.user)
 
     def test_api_get_config(self):
         """
@@ -1514,6 +1529,177 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         created_task = PaperlessTask.objects.get(task_id=async_result.id)
         self.assertEqual(created_task.task_name, PaperlessTask.TaskName.IMPORT_FILE)
         self.assertEqual(created_task.status, states.PENDING)
+
+    def test_api_reset_runtime_data_creates_task(self):
+        async_result = mock.Mock()
+        async_result.id = str(uuid.uuid4())
+
+        with mock.patch(
+            "paperless.views.reset_runtime_data.apply_async",
+            return_value=async_result,
+        ) as delay_mock:
+            response = self.client.post(
+                "/api/config/1/reset-runtime-data/",
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["detail"], "Runtime data reset started.")
+        delay_mock.assert_called_once()
+        self.assertIsInstance(response.data["task_id"], str)
+
+        created_task = PaperlessTask.objects.get(task_id=response.data["task_id"])
+        self.assertEqual(
+            created_task.task_name,
+            PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+        )
+        self.assertEqual(created_task.status, states.PENDING)
+
+    def test_api_reset_runtime_data_requires_superuser(self):
+        self.client.force_authenticate(user=None)
+        user = User.objects.create_user(username="staff-user")
+        user.user_permissions.add(
+            Permission.objects.get(codename="view_applicationconfiguration"),
+            Permission.objects.get(codename="change_applicationconfiguration"),
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(
+            "/api/config/1/reset-runtime-data/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_api_reset_runtime_data_ignores_stale_running_task(self):
+        stale_task = PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=str(uuid.uuid4()),
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status=states.PENDING,
+            date_created=timezone.now() - timedelta(minutes=20),
+            task_file_name="Runtime data reset",
+        )
+        async_result = mock.Mock()
+        async_result.id = str(uuid.uuid4())
+
+        with mock.patch(
+            "paperless.views.reset_runtime_data.apply_async",
+            return_value=async_result,
+        ):
+            response = self.client.post(
+                "/api/config/1/reset-runtime-data/",
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        stale_task.refresh_from_db()
+        self.assertEqual(stale_task.status, states.FAILURE)
+        self.assertIsNotNone(stale_task.date_done)
+
+    def test_api_release_runtime_reset_lock(self):
+        locked_task = PaperlessTask.objects.create(
+            type=PaperlessTask.TaskType.MANUAL_TASK,
+            task_id=str(uuid.uuid4()),
+            task_name=PaperlessTask.TaskName.RESET_RUNTIME_DATA,
+            status=states.STARTED,
+            date_created=timezone.now(),
+            date_started=timezone.now(),
+            task_file_name="Runtime data reset",
+        )
+
+        response = self.client.post(
+            "/api/config/1/release-runtime-reset-lock/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["released_tasks"], 1)
+        locked_task.refresh_from_db()
+        self.assertEqual(locked_task.status, states.FAILURE)
+        self.assertEqual(
+            locked_task.result,
+            (
+                "Task lock manually released by a superuser before starting a new "
+                "runtime data reset."
+            ),
+        )
+
+    def test_api_seed_demo_crafts_data_creates_task(self):
+        async_result = mock.Mock()
+        async_result.id = str(uuid.uuid4())
+
+        with mock.patch(
+            "paperless.views.create_demo_crafts_data.apply_async",
+            return_value=async_result,
+        ) as delay_mock:
+            response = self.client.post(
+                "/api/config/1/seed-demo-crafts-data/",
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["detail"], "Demo data generation started.")
+        delay_mock.assert_called_once()
+        self.assertIsInstance(response.data["task_id"], str)
+
+        created_task = PaperlessTask.objects.get(task_id=response.data["task_id"])
+        self.assertEqual(
+            created_task.task_name,
+            PaperlessTask.TaskName.CREATE_DEMO_CRAFTS_DATA,
+        )
+        self.assertEqual(created_task.status, states.PENDING)
+
+    def test_seed_handwerksbetrieb_demo_data_creates_demo_content(self):
+        owner = User.objects.create_superuser(username="seed-demo-owner")
+        result = seed_handwerksbetrieb_demo_data(owner=owner)
+
+        self.assertIn("Created 41 demo document(s)", result)
+        self.assertEqual(Document.objects.count(), 41)
+        self.assertEqual(Correspondent.objects.count(), 13)
+        self.assertEqual(Tag.objects.count(), 17)
+        self.assertEqual(DocumentType.objects.count(), 6)
+        self.assertEqual(StoragePath.objects.count(), 6)
+        self.assertEqual(CustomField.objects.count(), 6)
+
+        invoice = Document.objects.get(title="Rechnung Klein und Sohn")
+        self.assertEqual(invoice.correspondent.name, "Klein & Sohn GmbH")
+        self.assertEqual(invoice.document_type.name, "Rechnung")
+        self.assertTrue(invoice.tags.filter(name="dringend").exists())
+        self.assertIn("\n", invoice.content)
+        self.assertIn("Positionen", invoice.content)
+        self.assertTrue(
+            CustomFieldInstance.objects.filter(
+                document=invoice,
+                field__name="Auftragsnummer",
+                value_text="2026-0312",
+            ).exists(),
+        )
+        self.assertTrue(invoice.source_exists())
+
+    def test_reset_runtime_data_deletes_custom_fields_and_workflow_children(self):
+        owner = User.objects.create_superuser(username="reset-runtime-owner")
+        custom_field = CustomField.objects.create(
+            name="Auftragsnummer",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        trigger = WorkflowTrigger.objects.create(
+            schedule_date_custom_field=custom_field,
+        )
+        action = WorkflowAction.objects.create()
+        action.assign_custom_fields.add(custom_field)
+        action.remove_custom_fields.add(custom_field)
+        workflow = Workflow.objects.create(name="Test Workflow")
+        workflow.triggers.add(trigger)
+        workflow.actions.add(action)
+
+        result = reset_runtime_data.apply(kwargs={"owner_id": owner.id})
+
+        self.assertEqual(result.state, states.SUCCESS)
+        self.assertEqual(CustomField.objects.count(), 0)
+        self.assertEqual(Workflow.objects.count(), 0)
+        self.assertEqual(WorkflowTrigger.objects.count(), 0)
+        self.assertEqual(WorkflowAction.objects.count(), 0)
 
     def test_api_remote_import_inspect_uses_saved_masked_token(self):
         config = ApplicationConfiguration.objects.first()

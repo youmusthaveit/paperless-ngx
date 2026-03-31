@@ -1,7 +1,7 @@
 <pngx-page-header
-  title="File Tasks"
+  title="Tasks"
   i18n-title
-  info="File Tasks shows you documents that have been consumed, are waiting to be, or may have failed during the process."
+  info="Tasks shows you file processing jobs, import jobs, and other currently running Celery tasks."
   i18n-info
   >
   <div class="btn-toolbar col col-md-auto align-items-center gap-2">
@@ -42,6 +42,94 @@
     </div>
   </div>
 </pngx-page-header>
+
+<section class="mb-4">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+    <div>
+      <h4 class="mb-1" i18n>Running Tasks</h4>
+      <p class="text-muted mb-0" i18n>
+        Shows all currently pending or started Celery tasks, including runtime maintenance jobs and demo-data generation.
+      </p>
+    </div>
+    <div class="btn-toolbar col col-md-auto align-items-center gap-2">
+      <button class="btn btn-sm btn-outline-secondary me-2" (click)="clearRunningSelection()" [hidden]="selectedRunningTasks.size === 0">
+        <i-bs name="x" class="me-1"></i-bs><ng-container i18n>Clear selection</ng-container>
+      </button>
+      <button class="btn btn-sm btn-outline-danger me-2" (click)="resetRunningTasks()" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }" [disabled]="currentRunningTasks.length === 0">
+        <i-bs name="arrow-counterclockwise" class="me-1"></i-bs>{{resetRunningButtonText}}
+      </button>
+    </div>
+  </div>
+
+  @if (currentRunningTasks.length === 0) {
+    <div class="card bg-light border-0">
+      <div class="card-body text-muted small" i18n>No running Celery tasks right now.</div>
+    </div>
+  } @else {
+    <div class="table-responsive">
+      <table class="table table-striped align-middle border shadow-sm">
+        <thead>
+          <tr>
+            <th scope="col">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="all-running-tasks" [disabled]="currentRunningTasks.length === 0" [checked]="toggleAllRunningTasks" (click)="toggleAllRunning($event); $event.stopPropagation();">
+                <label class="form-check-label" for="all-running-tasks"></label>
+              </div>
+            </th>
+            <th scope="col" i18n>Type</th>
+            <th scope="col" i18n>Name</th>
+            <th scope="col" class="d-none d-lg-table-cell" i18n>Status</th>
+            <th scope="col" class="d-none d-lg-table-cell" i18n>Created</th>
+            <th scope="col" class="d-none d-lg-table-cell" i18n>Result</th>
+            <th scope="col" class="d-table-cell d-lg-none" i18n>Info</th>
+            <th scope="col" i18n>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (task of currentRunningTasks; track task.id) {
+            <tr (click)="toggleRunningSelected(task); $event.stopPropagation();">
+              <td>
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="running-task{{task.id}}" [checked]="selectedRunningTasks.has(task.id)" (click)="toggleRunningSelected(task); $event.stopPropagation();">
+                  <label class="form-check-label" for="running-task{{task.id}}"></label>
+                </div>
+              </td>
+              <td class="text-nowrap">{{ formatTaskName(task.task_name) }}</td>
+              <td class="overflow-auto name-col">{{ task.task_file_name }}</td>
+              <td class="d-none d-lg-table-cell">{{ task.status }}</td>
+              <td class="d-none d-lg-table-cell">{{ task.date_created | customDate:'short' }}</td>
+              <td class="d-none d-lg-table-cell">
+                @if (task.result?.length > 50) {
+                  <span class="small font-monospace text-muted">{{ task.result | slice:0:50 }}&hellip;</span>
+                }
+                @if (task.result?.length <= 50) {
+                  <span class="small font-monospace text-muted">{{ task.result }}</span>
+                }
+              </td>
+              <td class="d-lg-none">
+                <button class="btn btn-link" (click)="expandedRunningTask = expandedRunningTask == task.id ? undefined : task.id; $event.stopPropagation();">
+                  <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
+                </button>
+              </td>
+              <td scope="row">
+                <div class="btn-group" role="group">
+                  <button class="btn btn-sm btn-outline-danger" (click)="resetRunningTasks(task); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                    <i-bs name="arrow-counterclockwise"></i-bs>&nbsp;<ng-container i18n>Reset</ng-container>
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td class="p-0" [class.border-0]="expandedRunningTask !== task.id" colspan="8">
+                <pre #collapse="ngbCollapse" [ngbCollapse]="expandedRunningTask !== task.id" class="small mb-0"><div class="small p-1 p-lg-3 ms-lg-3">{{ task.result }}</div></pre>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>
 
 @if (!tasksService.completedFileTasks && tasksService.loading) {
   <div class="spinner-border spinner-border-sm fw-normal ms-2 me-auto" role="status"></div>

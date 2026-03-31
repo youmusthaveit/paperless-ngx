@@ -37,7 +37,7 @@ describe('TasksService', () => {
   it('calls tasks api endpoint on reload', () => {
     tasksService.reload()
     const req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}tasks/?task_name=consume_file&acknowledged=false`
+      `${environment.apiBaseUrl}tasks/?acknowledged=false`
     )
     expect(req.request.method).toEqual('GET')
   })
@@ -46,7 +46,7 @@ describe('TasksService', () => {
     tasksService.loading = true
     tasksService.reload()
     httpTestingController.expectNone(
-      `${environment.apiBaseUrl}tasks/?task_name=consume_file&acknowledged=false`
+      `${environment.apiBaseUrl}tasks/?acknowledged=false`
     )
   })
 
@@ -62,10 +62,24 @@ describe('TasksService', () => {
     req.flush([])
     // reload is then called
     httpTestingController
-      .expectOne(
-        `${environment.apiBaseUrl}tasks/?task_name=consume_file&acknowledged=false`
-      )
+      .expectOne(`${environment.apiBaseUrl}tasks/?acknowledged=false`)
       .flush([])
+  })
+
+  it('gets task by name', () => {
+    tasksService.getByTaskName(PaperlessTaskName.SanityCheck).subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}tasks/?task_name=${PaperlessTaskName.SanityCheck}`
+    )
+    expect(req.request.method).toEqual('GET')
+  })
+
+  it('gets running tasks', () => {
+    tasksService.getRunningTasks().subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}tasks/?running=true`
+    )
+    expect(req.request.method).toEqual('GET')
   })
 
   it('sorts tasks returned from api', () => {
@@ -121,7 +135,7 @@ describe('TasksService', () => {
     tasksService.reload()
 
     const req = httpTestingController.expectOne(
-      `${environment.apiBaseUrl}tasks/?task_name=consume_file&acknowledged=false`
+      `${environment.apiBaseUrl}tasks/?acknowledged=false`
     )
 
     req.flush(mockTasks)
@@ -146,5 +160,20 @@ describe('TasksService', () => {
     req.flush({
       result: 'success',
     })
+  })
+
+  it('calls reset_tasks api endpoint on reset and reloads', () => {
+    tasksService.resetTasks(new Set([1, 2])).subscribe()
+    const req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}tasks/reset/`
+    )
+    expect(req.request.method).toEqual('POST')
+    expect(req.request.body).toEqual({
+      tasks: [1, 2],
+    })
+    req.flush({ result: 2 })
+    httpTestingController
+      .expectOne(`${environment.apiBaseUrl}tasks/?acknowledged=false`)
+      .flush([])
   })
 })

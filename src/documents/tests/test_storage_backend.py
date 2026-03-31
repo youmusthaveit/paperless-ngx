@@ -303,6 +303,19 @@ class DocumentStorageBackendTestCase(TestCase):
                     b"local-file",
                 )
 
+    def test_document_move_uses_storage_when_local_file_is_missing(self):
+        with mock.patch.object(
+            document_storage,
+            "_build_document_storage",
+            return_value=FakeMemoryStorage(),
+        ):
+            FakeMemoryStorage._files["old.pdf"] = b"storage-file"
+
+            document_storage.document_move("archive", "old.pdf", "new.pdf")
+
+        self.assertNotIn("old.pdf", FakeMemoryStorage._files)
+        self.assertEqual(FakeMemoryStorage._files["new.pdf"], b"storage-file")
+
     def test_app_config_can_build_s3_storage(self):
         config = ApplicationConfiguration.objects.first()
         config.documents_storage_type = "s3"

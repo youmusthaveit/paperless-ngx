@@ -46,6 +46,7 @@ from documents.models import WorkflowRun
 from documents.models import WorkflowTrigger
 from documents.permissions import get_objects_for_user_owner_aware
 from documents.plugins.helpers import DocumentsStatusManager
+from documents.storage import _local_document_path
 from documents.storage import document_checksum_matches
 from documents.storage import document_delete
 from documents.storage import document_exists
@@ -403,11 +404,20 @@ def cleanup_document_deletion(sender, instance, **kwargs):
                     f"Moving {instance.source_name} to trash at {new_file_path}",
                 )
                 try:
-                    shutil.move(instance.source_path, new_file_path)
+                    shutil.move(
+                        _local_document_path("originals", instance.source_name),
+                        new_file_path,
+                    )
                 except OSError as e:
                     logger.error(
                         f"Failed to move {instance.source_name} to trash at "
                         f"{new_file_path}: {e}. Skipping cleanup!",
+                    )
+                    return
+                except NotImplementedError:
+                    logger.warning(
+                        "Skipping trash move because the originals storage backend "
+                        "does not expose local paths.",
                     )
                     return
             else:
@@ -525,6 +535,17 @@ def update_filename_and_move_files(
         # This will in turn cause this logic to move the file where it belongs.
         return
 
+    def _safe_local_path(kind: str) -> Path | None:
+        if kind == "originals":
+            local_path = _local_document_path("originals", str(instance.filename))
+            if local_path.exists():
+                return local_path
+        elif kind == "archive" and instance.has_archive_version:
+            local_path = _local_document_path("archive", str(instance.archive_filename))
+            if local_path.exists():
+                return local_path
+        return None
+
     with FileLock(settings.MEDIA_LOCK):
         try:
             # If this was waiting for the lock, the filename or archive_filename
@@ -534,19 +555,12 @@ def update_filename_and_move_files(
             instance.refresh_from_db()
 
             old_filename = instance.filename
-            old_source_path = (
-                instance.source_path if document_storage_is_local("originals") else None
-            )
+            old_source_path = _safe_local_path("originals")
             move_original = False
             original_already_moved = False
 
             old_archive_filename = instance.archive_filename
-            old_archive_path = (
-                instance.archive_path
-                if instance.archive_name is not None
-                and document_storage_is_local("archive")
-                else None
-            )
+            old_archive_path = _safe_local_path("archive")
             move_archive = False
             archive_already_moved = False
 
@@ -649,11 +663,7 @@ def update_filename_and_move_files(
                     old_name=str(old_filename),
                     new_name=str(instance.filename),
                     old_path=old_source_path,
-                    new_path=(
-                        instance.source_path
-                        if document_storage_is_local("originals")
-                        else None
-                    ),
+                    new_path=_safe_local_path("originals"),
                     root=settings.ORIGINALS_DIR,
                 )
                 document_move("originals", str(old_filename), str(instance.filename))
@@ -665,11 +675,7 @@ def update_filename_and_move_files(
                     old_name=str(old_archive_filename),
                     new_name=str(instance.archive_filename),
                     old_path=old_archive_path,
-                    new_path=(
-                        instance.archive_path
-                        if document_storage_is_local("archive")
-                        else None
-                    ),
+                    new_path=_safe_local_path("archive"),
                     root=settings.ARCHIVE_DIR,
                 )
                 document_move(

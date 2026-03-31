@@ -16,6 +16,7 @@ from celery import Task
 from celery import shared_task
 from celery import states
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.files import File
 from django.core.management import call_command
@@ -40,18 +41,24 @@ from documents.consumer import ConsumerPreflightPlugin
 from documents.consumer import WorkflowTriggerPlugin
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
+from documents.demo_data import seed_handwerksbetrieb_demo_data
 from documents.double_sided import CollatePlugin
 from documents.file_handling import generate_unique_filename
 from documents.matching import prefilter_documents_by_workflowtrigger
 from documents.models import Correspondent
+from documents.models import CustomField
 from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
+from documents.models import Note
 from documents.models import PaperlessTask
+from documents.models import SavedView
 from documents.models import ShareLink
 from documents.models import ShareLinkBundle
 from documents.models import StoragePath
 from documents.models import Tag
+from documents.models import Workflow
+from documents.models import WorkflowAction
 from documents.models import WorkflowRun
 from documents.models import WorkflowTrigger
 from documents.plugins.base import ConsumeTaskPlugin
@@ -805,6 +812,139 @@ def empty_trash(doc_ids=None) -> None:
             cleanup_document_deletion,
             sender=Document,
         )
+
+
+@shared_task(bind=True)
+def reset_runtime_data(
+    self: Task,
+    *,
+    owner_id: int | None = None,
+) -> str:
+    task = PaperlessTask.objects.filter(task_id=self.request.id).first()
+    now = timezone.now()
+    if task is not None:
+        task.status = states.STARTED
+        task.date_started = now
+        task.save(update_fields=["status", "date_started"])
+
+    owner = User.objects.filter(pk=owner_id).first() if owner_id is not None else None
+    active_document_ids = list(Document.objects.values_list("id", flat=True))
+    deleted_document_ids = list(Document.deleted_objects.values_list("id", flat=True))
+
+    counts = {
+        "documents": len(active_document_ids) + len(deleted_document_ids),
+        "correspondents": Correspondent.objects.count(),
+        "tags": Tag.objects.count(),
+        "document_types": DocumentType.objects.count(),
+        "storage_paths": StoragePath.objects.count(),
+        "custom_fields": CustomField.objects.count(),
+        "saved_views": SavedView.objects.count(),
+        "workflows": Workflow.objects.count(),
+        "workflow_triggers": WorkflowTrigger.objects.count(),
+        "workflow_actions": WorkflowAction.objects.count(),
+        "workflow_runs": WorkflowRun.global_objects.count(),
+        "share_links": ShareLink.global_objects.count(),
+        "share_link_bundles": ShareLinkBundle.objects.count(),
+        "tasks": PaperlessTask.objects.exclude(task_id=self.request.id).count(),
+    }
+
+    try:
+        if active_document_ids:
+            from documents import bulk_edit
+
+            bulk_edit.delete(active_document_ids, user=owner)
+
+        all_deleted_document_ids = list(
+            dict.fromkeys([*deleted_document_ids, *active_document_ids]),
+        )
+        if all_deleted_document_ids:
+            empty_trash(all_deleted_document_ids)
+
+        WorkflowRun.global_objects.all().hard_delete()
+        ShareLink.global_objects.all().hard_delete()
+        Note.global_objects.all().hard_delete()
+        ShareLinkBundle.objects.all().delete()
+        WorkflowTrigger.objects.all().delete()
+        WorkflowAction.objects.all().delete()
+        Workflow.objects.all().delete()
+        SavedView.objects.all().delete()
+        CustomFieldInstance.global_objects.all().hard_delete()
+        DocumentType.objects.all().delete()
+        CustomField.objects.all().delete()
+        StoragePath.objects.all().delete()
+        Tag.objects.all().delete()
+        Correspondent.objects.all().delete()
+        PaperlessTask.objects.exclude(task_id=self.request.id).delete()
+
+        if settings.MODEL_FILE.exists():
+            settings.MODEL_FILE.unlink()
+
+        result = (
+            "Runtime data reset completed. "
+            f"Deleted {counts['documents']} document(s), "
+            f"{counts['correspondents']} correspondent(s), "
+            f"{counts['tags']} tag(s), "
+            f"{counts['document_types']} document type(s), "
+            f"{counts['storage_paths']} storage path(s), "
+            f"{counts['custom_fields']} custom field(s), "
+            f"{counts['saved_views']} saved view(s), "
+            f"{counts['workflows']} workflow(s), "
+            f"{counts['workflow_triggers']} workflow trigger(s), "
+            f"{counts['workflow_actions']} workflow action(s), "
+            f"{counts['workflow_runs']} workflow run(s), "
+            f"{counts['share_links']} share link(s), "
+            f"{counts['share_link_bundles']} share link bundle(s), and "
+            f"{counts['tasks']} previous task record(s)."
+        )
+
+        if task is not None:
+            task.status = states.SUCCESS
+            task.result = result
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
+
+        return result
+    except Exception as exc:
+        logger.exception("Error while resetting runtime data")
+        if task is not None:
+            task.status = states.FAILURE
+            task.result = str(exc)
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
+        raise
+
+
+@shared_task(bind=True)
+def create_demo_crafts_data(
+    self: Task,
+    *,
+    owner_id: int | None = None,
+) -> str:
+    task = PaperlessTask.objects.filter(task_id=self.request.id).first()
+    now = timezone.now()
+    if task is not None:
+        task.status = states.STARTED
+        task.date_started = now
+        task.save(update_fields=["status", "date_started"])
+
+    owner = User.objects.filter(pk=owner_id).first() if owner_id is not None else None
+
+    try:
+        result = seed_handwerksbetrieb_demo_data(owner=owner)
+        if task is not None:
+            task.status = states.SUCCESS
+            task.result = result
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
+        return result
+    except Exception as exc:
+        logger.exception("Error while creating demo crafts data")
+        if task is not None:
+            task.status = states.FAILURE
+            task.result = str(exc)
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
+        raise
 
 
 @shared_task

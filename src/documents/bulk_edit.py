@@ -467,7 +467,12 @@ def rotate(
                 Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR))
                 / f"{root_doc.id}_rotated.pdf"
             )
-            with pikepdf.open(source_doc.source_path) as pdf:
+            with (
+                source_doc.local_source_path() as source_path,
+                pikepdf.open(
+                    source_path,
+                ) as pdf,
+            ):
                 for page in pdf.pages:
                     page.rotate(degrees, relative=True)
                 pdf.remove_unreferenced_resources()
@@ -525,14 +530,14 @@ def merge(
             source_mode=source_mode,
         )
         try:
-            doc_path = (
-                source_doc.archive_path
+            source_context = (
+                source_doc.local_archive_path()
                 if archive_fallback
                 and source_doc.mime_type != "application/pdf"
                 and source_doc.has_archive_version
-                else source_doc.source_path
+                else source_doc.local_source_path()
             )
-            with pikepdf.open(str(doc_path)) as pdf:
+            with source_context as doc_path, pikepdf.open(str(doc_path)) as pdf:
                 version = max(version, pdf.pdf_version)
                 merged_pdf.pages.extend(pdf.pages)
             affected_docs.append(doc.id)
@@ -628,41 +633,42 @@ def split(
     consume_tasks = []
 
     try:
-        with pikepdf.open(source_doc.source_path) as pdf:
-            for idx, split_doc in enumerate(pages):
-                dst: pikepdf.Pdf = pikepdf.new()
-                for page in split_doc:
-                    dst.pages.append(pdf.pages[page - 1])
-                filepath: Path = (
-                    Path(
-                        tempfile.mkdtemp(dir=settings.SCRATCH_DIR),
+        with source_doc.local_source_path() as source_path:
+            with pikepdf.open(source_path) as pdf:
+                for idx, split_doc in enumerate(pages):
+                    dst: pikepdf.Pdf = pikepdf.new()
+                    for page in split_doc:
+                        dst.pages.append(pdf.pages[page - 1])
+                    filepath: Path = (
+                        Path(
+                            tempfile.mkdtemp(dir=settings.SCRATCH_DIR),
+                        )
+                        / f"{doc.id}_{split_doc[0]}-{split_doc[-1]}.pdf"
                     )
-                    / f"{doc.id}_{split_doc[0]}-{split_doc[-1]}.pdf"
-                )
-                dst.remove_unreferenced_resources()
-                dst.save(filepath)
-                dst.close()
+                    dst.remove_unreferenced_resources()
+                    dst.save(filepath)
+                    dst.close()
 
-                overrides: DocumentMetadataOverrides = (
-                    DocumentMetadataOverrides().from_document(doc)
-                )
-                overrides.title = f"{doc.title} (split {idx + 1})"
-                if user is not None:
-                    overrides.owner_id = user.id
-                if not delete_originals:
-                    overrides.skip_asn_if_exists = True
-                logger.info(
-                    f"Adding split document with pages {split_doc} to the task queue.",
-                )
-                consume_tasks.append(
-                    consume_file.s(
-                        ConsumableDocument(
-                            source=DocumentSource.ConsumeFolder,
-                            original_file=filepath,
+                    overrides: DocumentMetadataOverrides = (
+                        DocumentMetadataOverrides().from_document(doc)
+                    )
+                    overrides.title = f"{doc.title} (split {idx + 1})"
+                    if user is not None:
+                        overrides.owner_id = user.id
+                    if not delete_originals:
+                        overrides.skip_asn_if_exists = True
+                    logger.info(
+                        f"Adding split document with pages {split_doc} to the task queue.",
+                    )
+                    consume_tasks.append(
+                        consume_file.s(
+                            ConsumableDocument(
+                                source=DocumentSource.ConsumeFolder,
+                                original_file=filepath,
+                            ),
+                            overrides,
                         ),
-                        overrides,
-                    ),
-                )
+                    )
 
             if delete_originals:
                 backup = release_archive_serial_numbers([doc.id])
@@ -712,7 +718,12 @@ def delete_pages(
             Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR))
             / f"{root_doc.id}_pages_deleted.pdf"
         )
-        with pikepdf.open(source_doc.source_path) as pdf:
+        with (
+            source_doc.local_source_path() as source_path,
+            pikepdf.open(
+                source_path,
+            ) as pdf,
+        ):
             offset = 1  # pages are 1-indexed
             for page_num in pages:
                 pdf.pages.remove(pdf.pages[page_num - offset])
@@ -771,7 +782,12 @@ def edit_pdf(
     pdf_docs: list[pikepdf.Pdf] = []
 
     try:
-        with pikepdf.open(source_doc.source_path) as src:
+        with (
+            source_doc.local_source_path() as source_path,
+            pikepdf.open(
+                source_path,
+            ) as src,
+        ):
             # prepare output documents
             max_idx = max(op.get("doc", 0) for op in operations)
             pdf_docs = [pikepdf.new() for _ in range(max_idx + 1)]
@@ -894,13 +910,14 @@ def remove_password(
             logger.info(
                 f"Attempting password removal from document {doc_ids[0]}",
             )
-            with pikepdf.open(source_doc.source_path, password=password) as pdf:
-                filepath: Path = (
-                    Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR))
-                    / f"{root_doc.id}_unprotected.pdf"
-                )
-                pdf.remove_unreferenced_resources()
-                pdf.save(filepath)
+            with source_doc.local_source_path() as source_path:
+                with pikepdf.open(source_path, password=password) as pdf:
+                    filepath: Path = (
+                        Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR))
+                        / f"{root_doc.id}_unprotected.pdf"
+                    )
+                    pdf.remove_unreferenced_resources()
+                    pdf.save(filepath)
 
                 if update_document:
                     # Create a new version rather than modifying the root/original in place.

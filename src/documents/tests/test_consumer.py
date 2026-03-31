@@ -2,6 +2,7 @@ import datetime
 import shutil
 import stat
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 from unittest.mock import MagicMock
@@ -1537,6 +1538,40 @@ class PostConsumeTestCase(DirectoriesMixin, GetConsumerMixin, TestCase):
                     consumer.run_post_consume_script(doc)
 
                 m.assert_called_once()
+
+    @mock.patch("documents.consumer.run_subprocess")
+    def test_post_consume_script_uses_local_source_path(
+        self,
+        m: mock.MagicMock,
+    ) -> None:
+        with tempfile.NamedTemporaryFile() as script:
+            with override_settings(POST_CONSUME_SCRIPT=script.name):
+                doc = Document.objects.create(title="Test", mime_type="application/pdf")
+
+                @contextmanager
+                def local_source_path():
+                    yield self.test_file
+
+                with mock.patch.object(
+                    Document,
+                    "source_path",
+                    new_callable=mock.PropertyMock,
+                    side_effect=NotImplementedError,
+                ):
+                    with mock.patch.object(
+                        doc,
+                        "local_source_path",
+                        side_effect=local_source_path,
+                    ):
+                        with self.get_consumer(self.test_file) as consumer:
+                            consumer.run_post_consume_script(doc)
+
+                m.assert_called_once()
+                self.assertEqual(m.call_args.args[0][3], str(self.test_file))
+                self.assertEqual(
+                    m.call_args.args[1]["DOCUMENT_SOURCE_PATH"],
+                    str(self.test_file),
+                )
 
     @mock.patch("documents.consumer.run_subprocess")
     def test_post_consume_script_with_correspondent_and_type(

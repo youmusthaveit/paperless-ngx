@@ -112,8 +112,11 @@ def check_sanity(*, progress=False, scheduled=True) -> SanityCheckMessages:
             messages.error(doc.pk, "Original of document does not exist.")
         else:
             if settings.DOCUMENTS_STORAGE_TYPE == "local":
-                source_path: Final[Path] = Path(doc.source_path).resolve()
-                if source_path in present_files:
+                try:
+                    source_path: Final[Path] = Path(doc.source_path).resolve()
+                except NotImplementedError:
+                    source_path = None
+                if source_path is not None and source_path in present_files:
                     present_files.remove(source_path)
             try:
                 checksum = hashlib.md5(
@@ -146,8 +149,11 @@ def check_sanity(*, progress=False, scheduled=True) -> SanityCheckMessages:
                 messages.error(doc.pk, "Archived version of document does not exist.")
             else:
                 if settings.DOCUMENTS_STORAGE_TYPE == "local":
-                    archive_path: Final[Path] = Path(doc.archive_path).resolve()
-                    if archive_path in present_files:
+                    try:
+                        archive_path: Final[Path] = Path(doc.archive_path).resolve()
+                    except NotImplementedError:
+                        archive_path = None
+                    if archive_path is not None and archive_path in present_files:
                         present_files.remove(archive_path)
                 try:
                     checksum = hashlib.md5(

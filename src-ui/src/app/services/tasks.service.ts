@@ -111,9 +111,39 @@ export class TasksService {
       .pipe(first(), takeUntil(this.unsubscribeNotifer))
   }
 
+  public getByTaskName(
+    taskName: PaperlessTaskName
+  ): Observable<PaperlessTask[]> {
+    return this.http
+      .get<
+        PaperlessTask[]
+      >(`${this.baseUrl}${this.endpoint}/?task_name=${encodeURIComponent(taskName)}`)
+      .pipe(first(), takeUntil(this.unsubscribeNotifer))
+  }
+
+  public getRunningTasks(): Observable<PaperlessTask[]> {
+    return this.http
+      .get<PaperlessTask[]>(`${this.baseUrl}${this.endpoint}/?running=true`)
+      .pipe(first(), takeUntil(this.unsubscribeNotifer))
+  }
+
   public dismissTasks(task_ids: Set<number>) {
     return this.http
       .post(`${this.baseUrl}tasks/acknowledge/`, {
+        tasks: [...task_ids],
+      })
+      .pipe(
+        first(),
+        takeUntil(this.unsubscribeNotifer),
+        tap(() => {
+          this.reload()
+        })
+      )
+  }
+
+  public resetTasks(task_ids: Set<number>) {
+    return this.http
+      .post(`${this.baseUrl}tasks/reset/`, {
         tasks: [...task_ids],
       })
       .pipe(

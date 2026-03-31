@@ -16,7 +16,7 @@ import {
   NgbNavItem,
 } from '@ng-bootstrap/ng-bootstrap'
 import { allIcons, NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
-import { throwError } from 'rxjs'
+import { of, throwError } from 'rxjs'
 import { routes } from 'src/app/app-routing.module'
 import {
   PaperlessTask,
@@ -157,6 +157,7 @@ describe('TasksComponent', () => {
 
     tasksService = TestBed.inject(TasksService)
     reloadSpy = jest.spyOn(tasksService, 'reload')
+    jest.spyOn(tasksService, 'getRunningTasks').mockReturnValue(of([]))
     httpTestingController = TestBed.inject(HttpTestingController)
     modalService = TestBed.inject(NgbModal)
     router = TestBed.inject(Router)
@@ -165,11 +166,12 @@ describe('TasksComponent', () => {
     component = fixture.componentInstance
     jest.useFakeTimers()
     fixture.detectChanges()
-    httpTestingController
-      .expectOne(
-        `${environment.apiBaseUrl}tasks/?task_name=consume_file&acknowledged=false`
-      )
-      .flush(tasks)
+    const requests = httpTestingController.match((req) =>
+      req.url.startsWith(`${environment.apiBaseUrl}tasks/`)
+    )
+    expect(requests).toHaveLength(1)
+    const fileTasksRequest = requests[0]
+    fileTasksRequest.flush(tasks)
   })
 
   it('should display file tasks in 4 tabs by status', () => {
@@ -185,7 +187,7 @@ describe('TasksComponent', () => {
     )
     expect(
       fixture.debugElement.queryAll(By.css('table input[type="checkbox"]'))
-    ).toHaveLength(currentTasksLength + 1)
+    ).toHaveLength(currentTasksLength + 2)
 
     currentTasksLength = tasks.filter(
       (t) => t.status === PaperlessTaskStatus.Complete
@@ -234,6 +236,13 @@ describe('TasksComponent', () => {
     const dismissSpy = jest.spyOn(tasksService, 'dismissTasks')
     component.dismissTask(tasks[0])
     expect(dismissSpy).toHaveBeenCalledWith(new Set([tasks[0].id]))
+  })
+
+  it('should support resetting running tasks', () => {
+    const resetSpy = jest.spyOn(tasksService, 'resetTasks')
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    component.resetRunningTasks(tasks[5])
+    expect(resetSpy).toHaveBeenCalledWith(new Set([tasks[5].id]))
   })
 
   it('should support dismiss specific checked tasks', () => {
