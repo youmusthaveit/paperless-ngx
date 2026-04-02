@@ -111,6 +111,25 @@ export class SystemStatusDialogComponent implements OnInit, OnDestroy {
     return this.runningTasks.has(taskName)
   }
 
+  public formatS3StorageUsage(usage: string[]): string {
+    if (!usage?.length) {
+      return ''
+    }
+
+    return usage
+      .map((entry) => {
+        switch (entry) {
+          case 'documents':
+            return 'Documents'
+          case 'backup':
+            return 'Backup'
+          default:
+            return entry
+        }
+      })
+      .join(', ')
+  }
+
   public runTask(taskName: PaperlessTaskName) {
     this.runningTasks.add(taskName)
     this.toastService.showInfo(`Task ${taskName} started`)

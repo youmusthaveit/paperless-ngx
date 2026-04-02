@@ -59,6 +59,13 @@ const status: SystemStatus = {
     celery_status: SystemStatusItemStatus.ERROR,
     celery_url: 'celery@localhost',
     celery_error: 'Error connecting to celery@localhost',
+    tika_url: 'http://localhost:9998',
+    tika_status: SystemStatusItemStatus.DISABLED,
+    tika_error: null,
+    gotenberg_url: 'http://localhost:3000',
+    gotenberg_status: SystemStatusItemStatus.DISABLED,
+    gotenberg_error: null,
+    s3_storages: [],
     index_status: SystemStatusItemStatus.OK,
     index_last_modified: new Date().toISOString(),
     index_error: null,
@@ -194,5 +201,12 @@ describe('SystemStatusDialogComponent', () => {
     expect(component.status.websocket_connected).toEqual(
       SystemStatusItemStatus.OK
     )
+  })
+
+  it('should format S3 storage usage labels', () => {
+    expect(component.formatS3StorageUsage(['documents', 'backup'])).toBe(
+      'Documents, Backup'
+    )
+    expect(component.formatS3StorageUsage([])).toBe('')
   })
 })

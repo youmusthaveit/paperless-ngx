@@ -12,6 +12,8 @@ from rest_framework.test import APITestCase
 
 from documents.models import PaperlessTask
 from paperless import version
+from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 
 
 class TestSystemStatus(APITestCase):
@@ -42,6 +44,13 @@ class TestSystemStatus(APITestCase):
         )
         self.mock_celery_ping = celery_patcher.start()
         self.addCleanup(celery_patcher.stop)
+
+        httpx_patcher = mock.patch(
+            "httpx.get",
+            side_effect=Exception("HTTP endpoint not available"),
+        )
+        self.mock_httpx_get = httpx_patcher.start()
+        self.addCleanup(httpx_patcher.stop)
 
     def tearDown(self) -> None:
         super().tearDown()
@@ -74,6 +83,16 @@ class TestSystemStatus(APITestCase):
         self.assertEqual(response.data["tasks"]["redis_url"], "redis://localhost:6379")
         self.assertEqual(response.data["tasks"]["redis_status"], "ERROR")
         self.assertIsNotNone(response.data["tasks"]["redis_error"])
+        self.assertEqual(response.data["tasks"]["tika_url"], "http://localhost:9998")
+        self.assertEqual(response.data["tasks"]["tika_status"], "DISABLED")
+        self.assertIsNone(response.data["tasks"]["tika_error"])
+        self.assertEqual(
+            response.data["tasks"]["gotenberg_url"],
+            "http://localhost:3000",
+        )
+        self.assertEqual(response.data["tasks"]["gotenberg_status"], "DISABLED")
+        self.assertIsNone(response.data["tasks"]["gotenberg_error"])
+        self.assertEqual(response.data["tasks"]["s3_storages"], [])
 
     def test_system_status_insufficient_permissions(self) -> None:
         """
@@ -190,6 +209,116 @@ class TestSystemStatus(APITestCase):
         response = self.client.get(self.ENDPOINT)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["tasks"]["celery_status"], "OK")
+
+    @override_settings(TIKA_ENABLED=True)
+    @mock.patch("httpx.get")
+    def test_system_status_tika_and_gotenberg_ping(self, mock_httpx_get) -> None:
+        """
+        GIVEN:
+            - Tika integration is enabled
+            - Tika and Gotenberg respond to HTTP requests
+        WHEN:
+            - The user requests the system status
+        THEN:
+            - The response contains the correct endpoint statuses
+        """
+        mock_httpx_get.return_value = mock.Mock(status_code=200)
+        self.client.force_login(self.user)
+        response = self.client.get(self.ENDPOINT)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["tasks"]["tika_status"], "OK")
+        self.assertEqual(response.data["tasks"]["gotenberg_status"], "OK")
+
+    @override_settings(TIKA_ENABLED=True)
+    @mock.patch("httpx.get")
+    def test_system_status_tika_and_gotenberg_error(self, mock_httpx_get) -> None:
+        """
+        GIVEN:
+            - Tika integration is enabled
+            - Tika and Gotenberg cannot be reached
+        WHEN:
+            - The user requests the system status
+        THEN:
+            - The response contains endpoint errors
+        """
+        mock_httpx_get.side_effect = Exception("Connection refused")
+        self.client.force_login(self.user)
+        response = self.client.get(self.ENDPOINT)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["tasks"]["tika_status"], "ERROR")
+        self.assertIsNotNone(response.data["tasks"]["tika_error"])
+        self.assertEqual(response.data["tasks"]["gotenberg_status"], "ERROR")
+        self.assertIsNotNone(response.data["tasks"]["gotenberg_error"])
+
+    @mock.patch("documents.views.test_s3_connection")
+    def test_system_status_s3_storage_statuses(self, mock_test_s3_connection) -> None:
+        """
+        GIVEN:
+            - Named S3 storages exist
+            - One of them is used for documents
+            - One connection test fails
+        WHEN:
+            - The user requests the system status
+        THEN:
+            - The response contains one status entry per S3 storage
+        """
+        primary = S3StorageConfiguration.objects.create(
+            name="Primary storage",
+            bucket="primary-bucket",
+            endpoint_url="https://s3-primary.example.com",
+        )
+        backup = S3StorageConfiguration.objects.create(
+            name="Backup storage",
+            bucket="backup-bucket",
+            endpoint_url="https://s3-backup.example.com",
+        )
+        ApplicationConfiguration.objects.update_or_create(
+            pk=1,
+            defaults={
+                "documents_s3_storage": primary,
+                "documents_backup_s3_storage": backup,
+            },
+        )
+
+        def side_effect(**kwargs):
+            if kwargs["s3_bucket"] == "backup-bucket":
+                raise Exception("Connection refused")
+
+        mock_test_s3_connection.side_effect = side_effect
+
+        self.client.force_login(self.user)
+        response = self.client.get(self.ENDPOINT)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["tasks"]["s3_storages"]), 2)
+        s3_statuses = {
+            storage_status["name"]: storage_status
+            for storage_status in response.data["tasks"]["s3_storages"]
+        }
+        self.assertEqual(
+            s3_statuses["Primary storage"],
+            {
+                "id": primary.pk,
+                "name": "Primary storage",
+                "bucket": "primary-bucket",
+                "endpoint_url": "https://s3-primary.example.com",
+                "status": "OK",
+                "error": None,
+                "usage": ["documents"],
+            },
+        )
+        self.assertEqual(
+            s3_statuses["Backup storage"],
+            {
+                "id": backup.pk,
+                "name": "Backup storage",
+                "bucket": "backup-bucket",
+                "endpoint_url": "https://s3-backup.example.com",
+                "status": "ERROR",
+                "error": "Error connecting to S3 storage Backup storage, check logs for more detail.",
+                "usage": ["backup"],
+            },
+        )
 
     @override_settings(INDEX_DIR=Path("/tmp/index"))
     @mock.patch("whoosh.index.FileIndex.last_modified")

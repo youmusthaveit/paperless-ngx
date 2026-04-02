@@ -35,6 +35,21 @@ export interface SystemStatus {
     celery_status: SystemStatusItemStatus
     celery_url: string
     celery_error: string
+    tika_url: string
+    tika_status: SystemStatusItemStatus
+    tika_error: string
+    gotenberg_url: string
+    gotenberg_status: SystemStatusItemStatus
+    gotenberg_error: string
+    s3_storages: {
+      id: number
+      name: string
+      bucket: string
+      endpoint_url?: string
+      status: SystemStatusItemStatus
+      error?: string
+      usage: string[]
+    }[]
     index_status: SystemStatusItemStatus
     index_last_modified: string // ISO date string
     index_error: string

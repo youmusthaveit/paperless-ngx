@@ -213,6 +213,7 @@ from documents.serialisers import WorkflowActionSerializer
 from documents.serialisers import WorkflowSerializer
 from documents.serialisers import WorkflowTriggerSerializer
 from documents.signals import document_updated
+from documents.storage import test_s3_connection
 from documents.tasks import build_share_link_bundle
 from documents.tasks import consume_file
 from documents.tasks import empty_trash
@@ -232,6 +233,7 @@ from paperless.celery import app as celery_app
 from paperless.config import AIConfig
 from paperless.config import GeneralConfig
 from paperless.models import ApplicationConfiguration
+from paperless.models import S3StorageConfiguration
 from paperless.parsers.registry import get_parser_registry
 from paperless.parsers.xrechnung import extract_embedded_einvoice_xml
 from paperless.serialisers import GroupSerializer
@@ -4335,6 +4337,34 @@ class CustomFieldViewSet(PermissionsAwareDocumentCountMixin, ModelViewSet):
                             "redis_status": serializers.CharField(),
                             "redis_error": serializers.CharField(),
                             "celery_status": serializers.CharField(),
+                            "tika_url": serializers.CharField(),
+                            "tika_status": serializers.CharField(),
+                            "tika_error": serializers.CharField(),
+                            "gotenberg_url": serializers.CharField(),
+                            "gotenberg_status": serializers.CharField(),
+                            "gotenberg_error": serializers.CharField(),
+                            "s3_storages": serializers.ListSerializer(
+                                child=inline_serializer(
+                                    name="S3StorageStatus",
+                                    fields={
+                                        "id": serializers.IntegerField(),
+                                        "name": serializers.CharField(),
+                                        "bucket": serializers.CharField(),
+                                        "endpoint_url": serializers.CharField(
+                                            allow_blank=True,
+                                            allow_null=True,
+                                        ),
+                                        "status": serializers.CharField(),
+                                        "error": serializers.CharField(
+                                            allow_blank=True,
+                                            allow_null=True,
+                                        ),
+                                        "usage": serializers.ListSerializer(
+                                            child=serializers.CharField(),
+                                        ),
+                                    },
+                                ),
+                            ),
                         },
                     ),
                     "index": inline_serializer(
@@ -4435,6 +4465,84 @@ class SystemStatusView(PassUserMixin):
                 f"System status detected a possible problem while connecting to celery: {e}",
             )
             celery_error = "Error connecting to celery, check logs for more detail."
+
+        def check_http_endpoint(url: str) -> tuple[str, str | None]:
+            try:
+                httpx.get(
+                    url,
+                    timeout=httpx.Timeout(5.0, connect=2.0),
+                    follow_redirects=True,
+                )
+            except Exception as e:
+                logger.exception(
+                    f"System status detected a possible problem while connecting to {url}: {e}",
+                )
+                return (
+                    "ERROR",
+                    f"Error connecting to {url}, check logs for more detail.",
+                )
+            else:
+                return "OK", None
+
+        tika_url = settings.TIKA_ENDPOINT
+        gotenberg_url = settings.TIKA_GOTENBERG_ENDPOINT
+        if settings.TIKA_ENABLED:
+            tika_status, tika_error = check_http_endpoint(tika_url)
+            gotenberg_status, gotenberg_error = check_http_endpoint(gotenberg_url)
+        else:
+            tika_status = "DISABLED"
+            tika_error = None
+            gotenberg_status = "DISABLED"
+            gotenberg_error = None
+
+        app_config = ApplicationConfiguration.objects.first()
+        s3_storages = []
+        for storage in S3StorageConfiguration.objects.order_by("name"):
+            usage = []
+            if app_config is not None:
+                if app_config.documents_s3_storage_id == storage.pk:
+                    usage.append("documents")
+                if app_config.documents_backup_s3_storage_id == storage.pk:
+                    usage.append("backup")
+
+            try:
+                test_s3_connection(
+                    prefix=storage.prefix or "",
+                    s3_bucket=storage.bucket,
+                    s3_endpoint_url=storage.endpoint_url,
+                    s3_access_key_id=storage.access_key_id,
+                    s3_secret_access_key=storage.secret_access_key,
+                    s3_region_name=storage.region_name,
+                    s3_default_acl=storage.default_acl,
+                    s3_custom_domain=storage.custom_domain,
+                    s3_url_protocol=storage.url_protocol or "https:",
+                    s3_addressing_style=storage.addressing_style,
+                    s3_querystring_auth=storage.querystring_auth
+                    if storage.querystring_auth is not None
+                    else False,
+                    s3_use_ssl=storage.use_ssl if storage.use_ssl is not None else True,
+                )
+            except Exception as e:
+                logger.exception(
+                    f"System status detected a possible problem while connecting to S3 storage {storage.name}: {e}",
+                )
+                s3_status = "ERROR"
+                s3_error = f"Error connecting to S3 storage {storage.name}, check logs for more detail."
+            else:
+                s3_status = "OK"
+                s3_error = None
+
+            s3_storages.append(
+                {
+                    "id": storage.pk,
+                    "name": storage.name,
+                    "bucket": storage.bucket,
+                    "endpoint_url": storage.endpoint_url,
+                    "status": s3_status,
+                    "error": s3_error,
+                    "usage": usage,
+                },
+            )
 
         index_error = None
         try:
@@ -4552,6 +4660,13 @@ class SystemStatusView(PassUserMixin):
                     "celery_status": celery_active,
                     "celery_url": celery_url,
                     "celery_error": celery_error,
+                    "tika_url": tika_url,
+                    "tika_status": tika_status,
+                    "tika_error": tika_error,
+                    "gotenberg_url": gotenberg_url,
+                    "gotenberg_status": gotenberg_status,
+                    "gotenberg_error": gotenberg_error,
+                    "s3_storages": s3_storages,
                     "index_status": index_status,
                     "index_last_modified": index_last_modified,
                     "index_error": index_error,

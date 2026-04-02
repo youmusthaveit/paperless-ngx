@@ -142,6 +142,46 @@
                   }
                 </ng-template>
               </dd>
+              <dt i18n>Tika Status</dt>
+              <dd>
+                <button class="btn btn-sm d-flex align-items-center btn-dark text-uppercase small" [ngbPopover]="tikaStatus" triggers="click mouseenter:mouseleave">
+                  {{status.tasks.tika_status}}
+                  @if (status.tasks.tika_status === 'OK') {
+                    <i-bs name="check-circle-fill" class="text-primary ms-2 lh-1"></i-bs>
+                  } @else if (status.tasks.tika_status === 'DISABLED') {
+                    <i-bs name="dash-circle-fill" class="text-secondary ms-2 lh-1"></i-bs>
+                  } @else {
+                    <i-bs name="exclamation-triangle-fill" class="text-danger ms-2 lh-1"></i-bs>
+                  }
+                </button>
+                <ng-template #tikaStatus>
+                  @if (status.tasks.tika_status === 'ERROR') {
+                    {{status.tasks.tika_url}}: {{status.tasks.tika_error}}
+                  } @else {
+                    {{status.tasks.tika_url}}
+                  }
+                </ng-template>
+              </dd>
+              <dt i18n>Gotenberg Status</dt>
+              <dd>
+                <button class="btn btn-sm d-flex align-items-center btn-dark text-uppercase small" [ngbPopover]="gotenbergStatus" triggers="click mouseenter:mouseleave">
+                  {{status.tasks.gotenberg_status}}
+                  @if (status.tasks.gotenberg_status === 'OK') {
+                    <i-bs name="check-circle-fill" class="text-primary ms-2 lh-1"></i-bs>
+                  } @else if (status.tasks.gotenberg_status === 'DISABLED') {
+                    <i-bs name="dash-circle-fill" class="text-secondary ms-2 lh-1"></i-bs>
+                  } @else {
+                    <i-bs name="exclamation-triangle-fill" class="text-danger ms-2 lh-1"></i-bs>
+                  }
+                </button>
+                <ng-template #gotenbergStatus>
+                  @if (status.tasks.gotenberg_status === 'ERROR') {
+                    {{status.tasks.gotenberg_url}}: {{status.tasks.gotenberg_error}}
+                  } @else {
+                    {{status.tasks.gotenberg_url}}
+                  }
+                </ng-template>
+              </dd>
             </dl>
           </div>
         </div>
@@ -304,6 +344,47 @@
                 </ng-template>
               }
             </dl>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card bg-light h-100">
+          <div class="card-header">
+            <h6 class="card-title mb-0" i18n>S3 Storage</h6>
+          </div>
+          <div class="card-body">
+            @if (status.tasks.s3_storages.length === 0) {
+              <div class="text-muted small" i18n>No S3 storages configured.</div>
+            } @else {
+              <dl class="card-text">
+                @for (storage of status.tasks.s3_storages; track storage.id) {
+                  <dt>{{storage.name}}</dt>
+                  <dd>
+                    <button class="btn btn-sm d-flex align-items-center btn-dark text-uppercase small" [ngbPopover]="s3StorageStatus" triggers="click mouseenter:mouseleave">
+                      {{storage.status}}
+                      @if (storage.status === 'OK') {
+                        <i-bs name="check-circle-fill" class="text-primary ms-2 lh-1"></i-bs>
+                      } @else {
+                        <i-bs name="exclamation-triangle-fill" class="text-danger ms-2 lh-1"></i-bs>
+                      }
+                    </button>
+                    <ng-template #s3StorageStatus>
+                      <div><strong i18n>Bucket</strong>: {{storage.bucket}}</div>
+                      @if (storage.endpoint_url) {
+                        <div><strong i18n>Endpoint</strong>: {{storage.endpoint_url}}</div>
+                      }
+                      @if (storage.usage.length > 0) {
+                        <div><strong i18n>Usage</strong>: {{formatS3StorageUsage(storage.usage)}}</div>
+                      }
+                      @if (storage.status === 'ERROR') {
+                        <div><strong i18n>Error</strong>: {{storage.error}}</div>
+                      }
+                    </ng-template>
+                  </dd>
+                }
+              </dl>
+            }
           </div>
         </div>
       </div>
