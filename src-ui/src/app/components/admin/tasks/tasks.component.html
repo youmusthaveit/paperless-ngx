@@ -55,8 +55,8 @@
       <button class="btn btn-sm btn-outline-secondary me-2" (click)="clearRunningSelection()" [hidden]="selectedRunningTasks.size === 0">
         <i-bs name="x" class="me-1"></i-bs><ng-container i18n>Clear selection</ng-container>
       </button>
-      <button class="btn btn-sm btn-outline-danger me-2" (click)="resetRunningTasks()" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }" [disabled]="currentRunningTasks.length === 0">
-        <i-bs name="arrow-counterclockwise" class="me-1"></i-bs>{{resetRunningButtonText}}
+      <button class="btn btn-sm btn-outline-danger me-2" (click)="abortRunningTasks()" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }" [disabled]="currentRunningTasks.length === 0">
+        <i-bs name="x-octagon" class="me-1"></i-bs>{{abortRunningButtonText}}
       </button>
     </div>
   </div>
@@ -113,8 +113,8 @@
               </td>
               <td scope="row">
                 <div class="btn-group" role="group">
-                  <button class="btn btn-sm btn-outline-danger" (click)="resetRunningTasks(task); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
-                    <i-bs name="arrow-counterclockwise"></i-bs>&nbsp;<ng-container i18n>Reset</ng-container>
+                  <button class="btn btn-sm btn-outline-danger" (click)="abortRunningTasks(task); $event.stopPropagation();" *pngxIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
+                    <i-bs name="x-octagon"></i-bs>&nbsp;<ng-container i18n>Abort</ng-container>
                   </button>
                 </div>
               </td>

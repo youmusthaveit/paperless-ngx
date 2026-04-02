@@ -238,11 +238,11 @@ describe('TasksComponent', () => {
     expect(dismissSpy).toHaveBeenCalledWith(new Set([tasks[0].id]))
   })
 
-  it('should support resetting running tasks', () => {
-    const resetSpy = jest.spyOn(tasksService, 'resetTasks')
+  it('should support aborting running tasks', () => {
+    const abortSpy = jest.spyOn(tasksService, 'abortTasks')
     jest.spyOn(window, 'confirm').mockReturnValue(true)
-    component.resetRunningTasks(tasks[5])
-    expect(resetSpy).toHaveBeenCalledWith(new Set([tasks[5].id]))
+    component.abortRunningTasks(tasks[5])
+    expect(abortSpy).toHaveBeenCalledWith(new Set([tasks[5].id]))
   })
 
   it('should support dismiss specific checked tasks', () => {

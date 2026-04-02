@@ -137,7 +137,8 @@ class TestTasks(DirectoriesMixin, APITestCase):
             {running_task.task_id, queued_task.task_id},
         )
 
-    def test_reset_running_tasks(self) -> None:
+    @mock.patch("documents.views.celery_app.control.revoke")
+    def test_reset_running_tasks(self, mock_revoke) -> None:
         pending_task = PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="queued.pdf",
@@ -168,9 +169,25 @@ class TestTasks(DirectoriesMixin, APITestCase):
         started_task.refresh_from_db()
         finished_task.refresh_from_db()
 
+        mock_revoke.assert_has_calls(
+            [
+                mock.call(pending_task.task_id, terminate=True),
+                mock.call(started_task.task_id, terminate=True),
+            ],
+            any_order=True,
+        )
+        self.assertEqual(mock_revoke.call_count, 2)
         self.assertEqual(pending_task.status, celery.states.FAILURE)
         self.assertEqual(started_task.status, celery.states.FAILURE)
         self.assertEqual(finished_task.status, celery.states.SUCCESS)
+        self.assertEqual(
+            pending_task.result,
+            "Task manually aborted by a superuser.",
+        )
+        self.assertEqual(
+            started_task.result,
+            "Task manually aborted by a superuser.",
+        )
 
     def test_reset_running_tasks_requires_superuser(self) -> None:
         regular_user = User.objects.create_user(username="regular")
@@ -192,6 +209,27 @@ class TestTasks(DirectoriesMixin, APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @mock.patch("documents.views.celery_app.control.revoke")
+    def test_reset_running_tasks_without_celery_id(self, mock_revoke) -> None:
+        task = PaperlessTask.objects.create(
+            task_id="",
+            task_file_name="queued.pdf",
+            status=celery.states.PENDING,
+        )
+
+        response = self.client.post(
+            self.ENDPOINT + "reset/",
+            {"tasks": [task.id]},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"result": 1})
+        mock_revoke.assert_not_called()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, celery.states.FAILURE)
+        self.assertEqual(task.result, "Task manually aborted by a superuser.")
 
     def test_acknowledge_tasks(self) -> None:
         """

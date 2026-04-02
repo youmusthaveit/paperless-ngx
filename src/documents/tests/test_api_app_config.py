@@ -1695,6 +1695,26 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(DocumentType.objects.count(), 6)
         self.assertEqual(StoragePath.objects.count(), 6)
         self.assertEqual(CustomField.objects.count(), 6)
+        self.assertFalse(
+            Correspondent.objects.exclude(
+                matching_algorithm=Correspondent.MATCH_AUTO,
+            ).exists(),
+        )
+        self.assertFalse(
+            Tag.objects.exclude(
+                matching_algorithm=Tag.MATCH_AUTO,
+            ).exists(),
+        )
+        self.assertFalse(
+            DocumentType.objects.exclude(
+                matching_algorithm=DocumentType.MATCH_AUTO,
+            ).exists(),
+        )
+        self.assertFalse(
+            StoragePath.objects.exclude(
+                matching_algorithm=StoragePath.MATCH_AUTO,
+            ).exists(),
+        )
 
         invoice = Document.objects.get(title="Rechnung Klein und Sohn")
         self.assertEqual(invoice.correspondent.name, "Klein & Sohn GmbH")

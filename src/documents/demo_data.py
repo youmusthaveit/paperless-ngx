@@ -165,8 +165,94 @@ def _ensure_document_bytes(document: Document, pdf_bytes: bytes) -> None:
         document.source_write_bytes(pdf_bytes)
 
 
-def _ensure_document_index(document: Document) -> None:
-    index.add_or_update_document(document)
+def _ensure_document_index(
+    document: Document,
+    *,
+    writer=None,
+) -> None:
+    if writer is None:
+        index.add_or_update_document(document)
+        return
+
+    index.update_document(writer, document)
+
+
+def _build_custom_field_value_kwargs(
+    field: CustomField,
+    value: Any,
+) -> dict[str, Any]:
+    value_kwargs: dict[str, Any] = {}
+    if field.data_type == CustomField.FieldDataType.STRING:
+        value_kwargs["value_text"] = value
+    elif field.data_type == CustomField.FieldDataType.URL:
+        value_kwargs["value_url"] = value
+    elif field.data_type == CustomField.FieldDataType.DATE:
+        value_kwargs["value_date"] = value
+    elif field.data_type == CustomField.FieldDataType.BOOL:
+        value_kwargs["value_bool"] = value
+    elif field.data_type == CustomField.FieldDataType.INT:
+        value_kwargs["value_int"] = value
+    elif field.data_type == CustomField.FieldDataType.FLOAT:
+        value_kwargs["value_float"] = value
+    elif field.data_type == CustomField.FieldDataType.MONETARY:
+        value_kwargs["value_monetary"] = value
+    elif field.data_type == CustomField.FieldDataType.SELECT:
+        value_kwargs["value_select"] = value
+    elif field.data_type == CustomField.FieldDataType.LONG_TEXT:
+        value_kwargs["value_long_text"] = value
+    return value_kwargs
+
+
+def _document_matches_demo_spec(
+    document: Document,
+    spec: DemoDocumentSpec,
+    *,
+    correspondent: Correspondent,
+    document_type: DocumentType,
+    storage_path: StoragePath,
+    fields: dict[str, CustomField],
+    owner: User | None,
+) -> bool:
+    if not document.source_exists():
+        return False
+
+    if (
+        document.title != spec.title
+        or document.correspondent_id != correspondent.id
+        or document.document_type_id != document_type.id
+        or document.storage_path_id != storage_path.id
+        or document.content != "\n".join(spec.content_lines)
+        or document.mime_type != "application/pdf"
+        or document.created != spec.created
+        or document.original_filename != spec.filename
+        or document.owner_id != (owner.id if owner is not None else None)
+        or document.page_count != 1
+    ):
+        return False
+
+    if set(document.tags.values_list("name", flat=True)) != set(spec.tags):
+        return False
+
+    existing_custom_fields = {
+        instance.field.name: getattr(
+            instance,
+            CustomFieldInstance.TYPE_TO_DATA_STORE_NAME_MAP[instance.field.data_type],
+        )
+        for instance in document.custom_fields.all()
+    }
+    expected_custom_fields = {
+        custom_field.field_name: next(
+            iter(
+                _build_custom_field_value_kwargs(
+                    fields[custom_field.field_name],
+                    custom_field.value,
+                ).values(),
+            ),
+            None,
+        )
+        for custom_field in spec.custom_fields
+    }
+    return existing_custom_fields == expected_custom_fields
 
 
 def _render_html_to_pdf_bytes(html_path: Path) -> bytes:
@@ -1341,13 +1427,37 @@ def _upsert_document(
     tags: dict[str, Tag],
     fields: dict[str, CustomField],
     owner: User | None,
+    index_writer=None,
+    render_dir: Path | None = None,
+    existing_document: Document | None = None,
 ) -> tuple[Document, bool]:
-    with tempfile.TemporaryDirectory(prefix="paperless-demo-md-") as tmpdir:
-        html_path = Path(tmpdir) / Path(spec.filename).with_suffix(".html").name
-        html_path.write_text(spec.content_html, encoding="utf-8")
-        display_lines = _html_to_display_lines(html_path.read_text(encoding="utf-8"))
-        pdf_bytes = _render_demo_pdf_bytes(html_path, display_lines)
-        checksum = hashlib.sha256(pdf_bytes).hexdigest()
+    if existing_document is not None and _document_matches_demo_spec(
+        existing_document,
+        spec,
+        correspondent=correspondent,
+        document_type=document_type,
+        storage_path=storage_path,
+        fields=fields,
+        owner=owner,
+    ):
+        return existing_document, False
+
+    display_lines = spec.content_lines
+
+    if _demo_pdf_rendering_available is False:
+        pdf_bytes = build_simple_pdf(list(display_lines))
+    else:
+        if render_dir is None:
+            with tempfile.TemporaryDirectory(prefix="paperless-demo-md-") as tmpdir:
+                html_path = Path(tmpdir) / Path(spec.filename).with_suffix(".html").name
+                html_path.write_text(spec.content_html, encoding="utf-8")
+                pdf_bytes = _render_demo_pdf_bytes(html_path, display_lines)
+        else:
+            html_path = render_dir / Path(spec.filename).with_suffix(".html").name
+            html_path.write_text(spec.content_html, encoding="utf-8")
+            pdf_bytes = _render_demo_pdf_bytes(html_path, display_lines)
+
+    checksum = hashlib.sha256(pdf_bytes).hexdigest()
     defaults = {
         "title": spec.title,
         "correspondent": correspondent,
@@ -1373,32 +1483,14 @@ def _upsert_document(
 
     for custom_field in spec.custom_fields:
         field = fields[custom_field.field_name]
-        value_kwargs: dict[str, Any] = {}
-        if field.data_type == CustomField.FieldDataType.STRING:
-            value_kwargs["value_text"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.URL:
-            value_kwargs["value_url"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.DATE:
-            value_kwargs["value_date"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.BOOL:
-            value_kwargs["value_bool"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.INT:
-            value_kwargs["value_int"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.FLOAT:
-            value_kwargs["value_float"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.MONETARY:
-            value_kwargs["value_monetary"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.SELECT:
-            value_kwargs["value_select"] = custom_field.value
-        elif field.data_type == CustomField.FieldDataType.LONG_TEXT:
-            value_kwargs["value_long_text"] = custom_field.value
+        value_kwargs = _build_custom_field_value_kwargs(field, custom_field.value)
         CustomFieldInstance.objects.update_or_create(
             document=document,
             field=field,
             defaults=value_kwargs,
         )
 
-    _ensure_document_index(document)
+    _ensure_document_index(document, writer=index_writer)
     return document, created
 
 
@@ -1424,7 +1516,7 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
     correspondents = {
         name: Correspondent.objects.update_or_create(
             name=name,
-            defaults={"match": "", "matching_algorithm": Correspondent.MATCH_NONE},
+            defaults={"match": "", "matching_algorithm": Correspondent.MATCH_AUTO},
         )[0]
         for name in correspondent_names
     }
@@ -1440,7 +1532,7 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
     document_types = {
         name: DocumentType.objects.update_or_create(
             name=name,
-            defaults={"match": "", "matching_algorithm": DocumentType.MATCH_NONE},
+            defaults={"match": "", "matching_algorithm": DocumentType.MATCH_AUTO},
         )[0]
         for name in document_type_names
     }
@@ -1451,16 +1543,19 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
             defaults={
                 "path": path,
                 "match": "",
-                "matching_algorithm": StoragePath.MATCH_NONE,
+                "matching_algorithm": StoragePath.MATCH_AUTO,
             },
         )[0]
         for name, path in [
-            ("Baustellen", "Baustellen/{created_year}/{title}"),
-            ("Kunden/Gewerbe", "Kunden/Gewerbe/{title}"),
-            ("Kunden/Privat", "Kunden/Privat/{title}"),
-            ("Service/Notdienst", "Service/Notdienst/{created_year}/{title}"),
-            ("Lieferanten", "Lieferanten/{created_year}/{title}"),
-            ("Verwaltung", "Verwaltung/{created_year}/{title}"),
+            ("Baustellen", "Baustellen/{{ created_year }}/{{ title }}"),
+            ("Kunden/Gewerbe", "Kunden/Gewerbe/{{ title }}"),
+            ("Kunden/Privat", "Kunden/Privat/{{ title }}"),
+            (
+                "Service/Notdienst",
+                "Service/Notdienst/{{ created_year }}/{{ title }}",
+            ),
+            ("Lieferanten", "Lieferanten/{{ created_year }}/{{ title }}"),
+            ("Verwaltung", "Verwaltung/{{ created_year }}/{{ title }}"),
         ]
     }
 
@@ -1469,7 +1564,7 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
             name=name,
             defaults={
                 "match": "",
-                "matching_algorithm": Tag.MATCH_NONE,
+                "matching_algorithm": Tag.MATCH_AUTO,
                 "is_inbox_tag": False,
             },
         )[0]
@@ -2705,19 +2800,36 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
     demo_documents.extend(_build_additional_demo_document_specs())
     demo_documents.extend(_build_historical_demo_document_specs())
 
-    created_count = 0
-    for spec in demo_documents:
-        _, created = _upsert_document(
-            spec,
-            correspondent=correspondents[spec.correspondent],
-            document_type=document_types[spec.document_type],
-            storage_path=storage_paths[spec.storage_path],
-            tags=tags,
-            fields=fields,
-            owner=owner,
+    existing_documents = {
+        document.filename: document
+        for document in Document.objects.filter(
+            filename__in=[spec.filename for spec in demo_documents],
         )
-        if created:
-            created_count += 1
+        .select_related("correspondent", "document_type", "storage_path", "owner")
+        .prefetch_related("tags", "custom_fields__field")
+    }
+
+    created_count = 0
+    with (
+        tempfile.TemporaryDirectory(prefix="paperless-demo-render-") as render_tmpdir,
+        index.open_index_writer() as index_writer,
+    ):
+        render_dir = Path(render_tmpdir)
+        for spec in demo_documents:
+            _, created = _upsert_document(
+                spec,
+                correspondent=correspondents[spec.correspondent],
+                document_type=document_types[spec.document_type],
+                storage_path=storage_paths[spec.storage_path],
+                tags=tags,
+                fields=fields,
+                owner=owner,
+                index_writer=index_writer,
+                render_dir=render_dir,
+                existing_document=existing_documents.get(spec.filename),
+            )
+            if created:
+                created_count += 1
 
     return (
         f"Created {created_count} demo document(s) for a classic crafts business "

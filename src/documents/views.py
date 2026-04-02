@@ -3844,15 +3844,26 @@ class TasksViewSet(ReadOnlyModelViewSet):
 
         try:
             now = timezone.now()
-            tasks = PaperlessTask.objects.filter(
-                id__in=task_ids,
-                status__in={states.PENDING, states.STARTED},
+            tasks = list(
+                PaperlessTask.objects.filter(
+                    id__in=task_ids,
+                    status__in={states.PENDING, states.STARTED},
+                ),
             )
-            result = tasks.update(
+            for task in tasks:
+                if task.task_id:
+                    celery_app.control.revoke(
+                        task.task_id,
+                        terminate=True,
+                    )
+
+            result = PaperlessTask.objects.filter(
+                id__in=[task.id for task in tasks],
+            ).update(
                 acknowledged=False,
                 status=states.FAILURE,
                 date_done=now,
-                result="Task manually reset by a superuser.",
+                result="Task manually aborted by a superuser.",
             )
             return Response({"result": result})
         except Exception:

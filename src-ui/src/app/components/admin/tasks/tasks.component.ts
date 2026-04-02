@@ -129,10 +129,10 @@ export class TasksComponent
       : $localize`Dismiss all`
   }
 
-  get resetRunningButtonText(): string {
+  get abortRunningButtonText(): string {
     return this.selectedRunningTasks.size > 0
-      ? $localize`Reset selected`
-      : $localize`Reset all`
+      ? $localize`Abort selected`
+      : $localize`Abort all`
   }
 
   ngOnInit() {
@@ -430,7 +430,7 @@ export class TasksComponent
       })
   }
 
-  public resetRunningTasks(task?: PaperlessTask) {
+  public abortRunningTasks(task?: PaperlessTask) {
     const tasks = task
       ? new Set([task.id])
       : new Set(this.getRunningSelection().values())
@@ -443,19 +443,19 @@ export class TasksComponent
 
     const message =
       tasks.size > 1
-        ? $localize`Reset all ${tasks.size} running tasks?`
-        : $localize`Reset this running task?`
+        ? $localize`Abort all ${tasks.size} running tasks?`
+        : $localize`Abort this running task?`
     if (!window.confirm(message)) {
       return
     }
 
-    this.tasksService.resetTasks(tasks).subscribe({
+    this.tasksService.abortTasks(tasks).subscribe({
       next: () => {
         this.clearRunningSelection()
         this.loadRunningTasks()
       },
       error: (e) =>
-        this.toastService.showError($localize`Error resetting tasks`, e),
+        this.toastService.showError($localize`Error aborting tasks`, e),
     })
   }
 }

@@ -141,7 +141,7 @@ export class TasksService {
       )
   }
 
-  public resetTasks(task_ids: Set<number>) {
+  public abortTasks(task_ids: Set<number>) {
     return this.http
       .post(`${this.baseUrl}tasks/reset/`, {
         tasks: [...task_ids],

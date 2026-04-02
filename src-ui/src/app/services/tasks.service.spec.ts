@@ -162,8 +162,8 @@ describe('TasksService', () => {
     })
   })
 
-  it('calls reset_tasks api endpoint on reset and reloads', () => {
-    tasksService.resetTasks(new Set([1, 2])).subscribe()
+  it('calls reset_tasks api endpoint on abort and reloads', () => {
+    tasksService.abortTasks(new Set([1, 2])).subscribe()
     const req = httpTestingController.expectOne(
       `${environment.apiBaseUrl}tasks/reset/`
     )
