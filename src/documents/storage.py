@@ -46,14 +46,18 @@ def _local_document_exists(kind: str, name: str | None) -> bool:
     return bool(name) and _local_document_path(kind, str(name)).exists()
 
 
-def _build_s3_location(prefix: str, kind: str) -> str:
-    return "/".join(part for part in (prefix.strip("/"), kind) if part)
+def _normalize_s3_prefix(prefix: str | None) -> str:
+    return (prefix or "").strip("/")
+
+
+def _build_s3_location(prefix: str | None, kind: str) -> str:
+    return "/".join(part for part in (_normalize_s3_prefix(prefix), kind) if part)
 
 
 def _build_s3_storage(
     *,
     kind: str,
-    prefix: str,
+    prefix: str | None,
     s3_bucket: str | None,
     s3_endpoint_url: str | None,
     s3_access_key_id: str | None,
@@ -101,7 +105,7 @@ def _build_s3_storage(
 def _build_document_storage(
     kind: str,
     storage_type: str,
-    prefix: str,
+    prefix: str | None,
     s3_bucket: str | None,
     s3_endpoint_url: str | None,
     s3_access_key_id: str | None,
@@ -163,7 +167,7 @@ def get_document_storage(
 @lru_cache(maxsize=32)
 def _build_document_backup_storage(
     kind: str,
-    prefix: str,
+    prefix: str | None,
     s3_bucket: str | None,
     s3_endpoint_url: str | None,
     s3_access_key_id: str | None,
@@ -255,7 +259,7 @@ def test_s3_connection(
     for kind in DOCUMENT_STORAGE_LOCATIONS:
         storage = _build_s3_storage(
             kind=kind,
-            prefix=prefix,
+            prefix=_normalize_s3_prefix(prefix),
             s3_bucket=s3_bucket,
             s3_endpoint_url=s3_endpoint_url,
             s3_access_key_id=s3_access_key_id,
@@ -285,7 +289,7 @@ def get_s3_configuration_storage(
         "Storage",
         _build_s3_storage(
             kind=location.strip("/"),
-            prefix=storage_config.prefix or "",
+            prefix=_normalize_s3_prefix(storage_config.prefix),
             s3_bucket=storage_config.bucket,
             s3_endpoint_url=storage_config.endpoint_url,
             s3_access_key_id=storage_config.access_key_id,

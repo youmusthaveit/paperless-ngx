@@ -1110,6 +1110,37 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             s3_use_ssl=True,
         )
 
+    @mock.patch("paperless.views.test_s3_connection")
+    def test_api_test_named_s3_storage_without_prefix(self, test_s3_connection_mock):
+        storage = S3StorageConfiguration.objects.create(
+            name="No prefix storage",
+            prefix=None,
+            bucket="paperless-backup",
+            endpoint_url="https://s3.example.com",
+        )
+
+        response = self.client.post(
+            f"{self.ENDPOINT}{storage.pk}/test-connection/",
+            json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        test_s3_connection_mock.assert_called_once_with(
+            prefix=None,
+            s3_bucket="paperless-backup",
+            s3_endpoint_url="https://s3.example.com",
+            s3_access_key_id=None,
+            s3_secret_access_key=None,
+            s3_region_name=None,
+            s3_default_acl=None,
+            s3_custom_domain=None,
+            s3_url_protocol="https:",
+            s3_addressing_style=None,
+            s3_querystring_auth=False,
+            s3_use_ssl=True,
+        )
+
     @mock.patch("paperless.views.export_documents_to_s3_storage.delay")
     def test_api_export_named_s3_storage(self, export_delay_mock):
         task_id = str(uuid.uuid4())
