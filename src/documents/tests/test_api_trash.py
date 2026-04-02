@@ -1,5 +1,7 @@
 from datetime import date
+from unittest import mock
 
+from celery import states
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.core.cache import cache
@@ -7,6 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from documents.models import Document
+from documents.models import PaperlessTask
 
 
 class TestTrashAPI(APITestCase):
@@ -18,7 +21,8 @@ class TestTrashAPI(APITestCase):
         self.client.force_authenticate(user=self.user)
         cache.clear()
 
-    def test_api_trash(self) -> None:
+    @mock.patch("documents.views.empty_trash.delay")
+    def test_api_trash(self, delay_mock) -> None:
         """
         GIVEN:
             - Existing document
@@ -61,14 +65,17 @@ class TestTrashAPI(APITestCase):
         self.assertEqual(resp.data["count"], 0)
 
         self.client.delete(f"/api/documents/{document.pk}/")
+        delay_mock.return_value = mock.Mock(id="empty-trash-single-task-id")
         resp = self.client.post(
             "/api/trash/",
             {"action": "empty", "documents": [document.pk]},
         )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(Document.global_objects.count(), 0)
+        self.assertEqual(resp.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(Document.global_objects.count(), 1)
+        delay_mock.assert_called_once_with(doc_ids=[document.pk])
 
-    def test_trash_api_empty_all(self) -> None:
+    @mock.patch("documents.views.empty_trash.delay")
+    def test_trash_api_empty_all(self, delay_mock) -> None:
         """
         GIVEN:
             - Existing documents in trash
@@ -93,13 +100,19 @@ class TestTrashAPI(APITestCase):
         )
         document2.delete()
 
+        delay_mock.return_value = mock.Mock(id="empty-trash-task-id")
+
         self.client.force_login(user=self.user)
         resp = self.client.post(
             "/api/trash/",
             {"action": "empty", "documents": []},
         )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(Document.global_objects.count(), 0)
+        self.assertEqual(resp.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(Document.global_objects.count(), 2)
+        delay_mock.assert_called_once_with(doc_ids=[document.pk, document2.pk])
+        task = PaperlessTask.objects.get(task_id="empty-trash-task-id")
+        self.assertEqual(task.task_name, PaperlessTask.TaskName.EMPTY_TRASH)
+        self.assertEqual(task.status, states.PENDING)
 
     def test_api_trash_show_owned_only(self) -> None:
         """

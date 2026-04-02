@@ -20,6 +20,7 @@ from typing import Literal
 from unicodedata import normalize
 from urllib.parse import quote
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 import magic
@@ -4721,9 +4722,24 @@ class TrashView(ListModelMixin, PassUserMixin):
             for doc in Document.deleted_objects.filter(id__in=doc_ids).all():
                 doc.restore(strict=False)
         elif action == "empty":
-            if doc_ids is None:
-                doc_ids = [doc.id for doc in docs]
-            empty_trash(doc_ids=doc_ids)
+            if not doc_ids:
+                doc_ids = [
+                    doc.id for doc in self.filter_queryset(self.get_queryset()).all()
+                ]
+            async_result = empty_trash.delay(doc_ids=doc_ids)
+            PaperlessTask.objects.create(
+                type=PaperlessTask.TaskType.MANUAL_TASK,
+                task_id=async_result.id or str(uuid4()),
+                status=states.PENDING,
+                task_file_name=f"{len(doc_ids)} trash document(s)",
+                task_name=PaperlessTask.TaskName.EMPTY_TRASH,
+                result=None,
+                owner=request.user,
+            )
+            return Response(
+                {"result": "OK", "doc_ids": doc_ids, "task_id": async_result.id},
+                status=202,
+            )
         return Response({"result": "OK", "doc_ids": doc_ids})
 
 

@@ -121,7 +121,9 @@ export class TrashComponent
           .emptyTrash(documents ? Array.from(documents) : null)
           .subscribe({
             next: () => {
-              this.toastService.showInfo($localize`Document(s) deleted`)
+              this.toastService.showInfo(
+                $localize`Document deletion started in background`
+              )
               this.allToggled = false
               modal.close()
               this.reload()

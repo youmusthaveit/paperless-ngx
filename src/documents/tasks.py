@@ -777,8 +777,15 @@ def update_document_content_maybe_archive_file(document_id) -> None:
         )
 
 
-@shared_task
-def empty_trash(doc_ids=None) -> None:
+@shared_task(bind=True)
+def empty_trash(self: Task, doc_ids=None) -> None:
+    task = PaperlessTask.objects.filter(task_id=self.request.id).first()
+    now = timezone.now()
+    if task is not None:
+        task.status = states.STARTED
+        task.date_started = now
+        task.save(update_fields=["status", "date_started"])
+
     if doc_ids is None:
         logger.info("Emptying trash of all expired documents")
     documents = (
@@ -805,8 +812,18 @@ def empty_trash(doc_ids=None) -> None:
                 content_type=ContentType.objects.get_for_model(Document),
                 object_id__in=deleted_document_ids,
             ).delete()
+        if task is not None:
+            task.status = states.SUCCESS
+            task.result = f"Deleted {len(deleted_document_ids)} documents from trash"
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
     except Exception as e:  # pragma: no cover
         logger.exception(f"Error while emptying trash: {e}")
+        if task is not None:
+            task.status = states.FAILURE
+            task.result = str(e)
+            task.date_done = timezone.now()
+            task.save(update_fields=["status", "result", "date_done"])
     finally:
         models.signals.post_delete.disconnect(
             cleanup_document_deletion,

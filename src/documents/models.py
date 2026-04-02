@@ -914,6 +914,7 @@ class PaperlessTask(ModelWithOwner):
             "create_demo_crafts_data",
             _("Create Demo Crafts Data"),
         )
+        EMPTY_TRASH = ("empty_trash", _("Empty Trash"))
         EXPORT_S3_STORAGE = ("export_s3_storage", _("Export S3 Storage"))
         IMPORT_S3_STORAGE = ("import_s3_storage", _("Import S3 Storage"))
         SCHEDULED_BACKUP_S3_STORAGE = (
