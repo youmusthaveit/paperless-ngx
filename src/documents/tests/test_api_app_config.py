@@ -23,6 +23,7 @@ from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import PaperlessTask
+from documents.models import SavedView
 from documents.models import StoragePath
 from documents.models import Tag
 from documents.models import Workflow
@@ -1695,6 +1696,7 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(DocumentType.objects.count(), 6)
         self.assertEqual(StoragePath.objects.count(), 6)
         self.assertEqual(CustomField.objects.count(), 6)
+        self.assertEqual(SavedView.objects.count(), 6)
         self.assertFalse(
             Correspondent.objects.exclude(
                 matching_algorithm=Correspondent.MATCH_AUTO,
@@ -1732,6 +1734,40 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertTrue(invoice.source_exists())
         self.assertTrue(
             Document.objects.filter(created__year__lte=2011).exists(),
+        )
+
+    def test_seed_handwerksbetrieb_demo_data_creates_demo_saved_views(self):
+        owner = User.objects.create_superuser(username="seed-demo-views-owner")
+
+        with (
+            mock.patch(
+                "documents.demo_data._build_additional_demo_document_specs",
+                return_value=[],
+            ),
+            mock.patch(
+                "documents.demo_data._build_historical_demo_document_specs",
+                return_value=[],
+            ),
+            mock.patch(
+                "documents.demo_data._upsert_document",
+                return_value=(None, False),
+            ),
+        ):
+            seed_handwerksbetrieb_demo_data(owner=owner)
+
+        self.assertEqual(SavedView.objects.count(), 6)
+        notdienst_view = SavedView.objects.get(name="Demo: Notdienst & dringend")
+        self.assertEqual(notdienst_view.owner, owner)
+        self.assertEqual(notdienst_view.filter_rules.count(), 2)
+        self.assertEqual(notdienst_view.group_by, None)
+        self.assertTrue(notdienst_view.filter_rules.filter(rule_type=25).exists())
+        self.assertTrue(notdienst_view.filter_rules.filter(rule_type=6).exists())
+        self.assertTrue(
+            all(tag.name and tag.name[0].isupper() for tag in Tag.objects.all()),
+        )
+        self.assertEqual(
+            Tag.objects.values_list("color", flat=True).distinct().count(),
+            Tag.objects.count(),
         )
 
     def test_demo_pdf_generation_uses_gotenberg_html_to_pdf(self):
@@ -1795,6 +1831,33 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         self.assertEqual(Workflow.objects.count(), 0)
         self.assertEqual(WorkflowTrigger.objects.count(), 0)
         self.assertEqual(WorkflowAction.objects.count(), 0)
+        self.assertEqual(SavedView.objects.count(), 0)
+
+    def test_reset_runtime_data_deletes_demo_saved_views(self):
+        owner = User.objects.create_superuser(username="reset-demo-views-owner")
+
+        with (
+            mock.patch(
+                "documents.demo_data._build_additional_demo_document_specs",
+                return_value=[],
+            ),
+            mock.patch(
+                "documents.demo_data._build_historical_demo_document_specs",
+                return_value=[],
+            ),
+            mock.patch(
+                "documents.demo_data._upsert_document",
+                return_value=(None, False),
+            ),
+        ):
+            seed_handwerksbetrieb_demo_data(owner=owner)
+
+        self.assertEqual(SavedView.objects.count(), 6)
+
+        result = reset_runtime_data.apply(kwargs={"owner_id": owner.id})
+
+        self.assertEqual(result.state, states.SUCCESS)
+        self.assertEqual(SavedView.objects.count(), 0)
 
     def test_api_remote_import_inspect_uses_saved_masked_token(self):
         config = ApplicationConfiguration.objects.first()

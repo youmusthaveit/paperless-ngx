@@ -25,6 +25,8 @@ from documents.models import CustomField
 from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
+from documents.models import SavedView
+from documents.models import SavedViewFilterRule
 from documents.models import StoragePath
 from documents.models import Tag
 from documents.parsers import ParseError
@@ -151,6 +153,24 @@ class DemoDocumentSpec:
     custom_fields: tuple[DemoCustomFieldValue, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class DemoSavedViewSpec:
+    name: str
+    filter_rules: tuple[tuple[int, str], ...]
+    sort_field: str = "created"
+    sort_reverse: bool = True
+    page_size: int = 50
+    display_mode: str | None = SavedView.DisplayMode.TABLE
+    display_fields: tuple[str, ...] = (
+        SavedView.DisplayFields.TITLE,
+        SavedView.DisplayFields.CREATED,
+        SavedView.DisplayFields.CORRESPONDENT,
+        SavedView.DisplayFields.DOCUMENT_TYPE,
+        SavedView.DisplayFields.TAGS,
+    )
+    group_by: str | None = None
+
+
 def _ensure_choice_fields(field: CustomField, options: list[tuple[str, str]]) -> None:
     field.extra_data = {
         "select_options": [
@@ -201,6 +221,103 @@ def _build_custom_field_value_kwargs(
     elif field.data_type == CustomField.FieldDataType.LONG_TEXT:
         value_kwargs["value_long_text"] = value
     return value_kwargs
+
+
+def _seed_saved_views(
+    *,
+    owner: User | None,
+    document_types: dict[str, DocumentType],
+    storage_paths: dict[str, StoragePath],
+    tags: dict[str, Tag],
+) -> None:
+    saved_view_specs = [
+        DemoSavedViewSpec(
+            name="Demo: Rechnungen",
+            filter_rules=(
+                (
+                    4,
+                    str(document_types["Rechnung"].pk),
+                ),
+            ),
+            group_by=SavedView.GroupBy.CORRESPONDENT,
+        ),
+        DemoSavedViewSpec(
+            name="Demo: Baustellen",
+            filter_rules=(
+                (
+                    25,
+                    str(storage_paths["Baustellen"].pk),
+                ),
+            ),
+            group_by=SavedView.GroupBy.CREATED_MONTH,
+        ),
+        DemoSavedViewSpec(
+            name="Demo: Privatkunden",
+            filter_rules=(
+                (
+                    25,
+                    str(storage_paths["Kunden/Privat"].pk),
+                ),
+            ),
+            display_mode=SavedView.DisplayMode.SMALL_CARDS,
+        ),
+        DemoSavedViewSpec(
+            name="Demo: Lieferantenbelege",
+            filter_rules=(
+                (
+                    25,
+                    str(storage_paths["Lieferanten"].pk),
+                ),
+            ),
+        ),
+        DemoSavedViewSpec(
+            name="Demo: Wartung",
+            filter_rules=(
+                (
+                    4,
+                    str(document_types["Wartungsbericht"].pk),
+                ),
+            ),
+        ),
+        DemoSavedViewSpec(
+            name="Demo: Notdienst & dringend",
+            filter_rules=(
+                (
+                    25,
+                    str(storage_paths["Service/Notdienst"].pk),
+                ),
+                (
+                    6,
+                    str(tags["dringend"].pk),
+                ),
+            ),
+        ),
+    ]
+
+    for spec in saved_view_specs:
+        saved_view, _ = SavedView.objects.update_or_create(
+            name=spec.name,
+            owner=owner,
+            defaults={
+                "sort_field": spec.sort_field,
+                "sort_reverse": spec.sort_reverse,
+                "page_size": spec.page_size,
+                "display_mode": spec.display_mode,
+                "display_fields": list(spec.display_fields),
+                "group_by": spec.group_by,
+            },
+        )
+        saved_view.filter_rules.all().delete()
+        SavedViewFilterRule.objects.bulk_create(
+            [
+                SavedViewFilterRule(
+                    saved_view=saved_view,
+                    rule_type=rule_type,
+                    value=value,
+                )
+                for rule_type, value in spec.filter_rules
+            ],
+        )
 
 
 def _document_matches_demo_spec(
@@ -1559,35 +1676,44 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
         ]
     }
 
+    tag_defs = [
+        ("angebot", "Angebot", "#b54a3a"),
+        ("auftrag", "Auftrag", "#d17c2f"),
+        ("rechnung", "Rechnung", "#b3922f"),
+        ("material", "Material", "#5d8f2a"),
+        ("montage", "Montage", "#2e9b74"),
+        ("bad", "Bad", "#2f8da8"),
+        ("heizung", "Heizung", "#3b73b9"),
+        ("elektrik", "Elektrik", "#5662c7"),
+        ("service", "Service", "#7b58bf"),
+        ("notdienst", "Notdienst", "#9a4eb2"),
+        ("wartung", "Wartung", "#b64c90"),
+        ("privatkunde", "Privatkunde", "#cf5e74"),
+        ("gewerbe", "Gewerbe", "#6d7a8f"),
+        ("oeffentlich", "Oeffentlich", "#4f7f74"),
+        ("object", "Object", "#8b6a54"),
+        ("sanierung", "Sanierung", "#7d5d49"),
+        ("dringend", "Dringend", "#c23d3d"),
+    ]
     tags = {
-        name: Tag.objects.update_or_create(
+        key: Tag.objects.update_or_create(
             name=name,
             defaults={
                 "match": "",
                 "matching_algorithm": Tag.MATCH_AUTO,
                 "is_inbox_tag": False,
+                "color": color,
             },
         )[0]
-        for name in [
-            "angebot",
-            "auftrag",
-            "rechnung",
-            "material",
-            "montage",
-            "bad",
-            "heizung",
-            "elektrik",
-            "service",
-            "notdienst",
-            "wartung",
-            "privatkunde",
-            "gewerbe",
-            "oeffentlich",
-            "object",
-            "sanierung",
-            "dringend",
-        ]
+        for key, name, color in tag_defs
     }
+
+    _seed_saved_views(
+        owner=owner,
+        document_types=document_types,
+        storage_paths=storage_paths,
+        tags=tags,
+    )
 
     field_defs = [
         ("Auftragsnummer", CustomField.FieldDataType.STRING),
