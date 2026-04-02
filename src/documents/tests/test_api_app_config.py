@@ -1657,8 +1657,8 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
         owner = User.objects.create_superuser(username="seed-demo-owner")
         result = seed_handwerksbetrieb_demo_data(owner=owner)
 
-        self.assertIn("Created 41 demo document(s)", result)
-        self.assertEqual(Document.objects.count(), 41)
+        self.assertIn("Created 301 demo document(s)", result)
+        self.assertEqual(Document.objects.count(), 301)
         self.assertEqual(Correspondent.objects.count(), 13)
         self.assertEqual(Tag.objects.count(), 17)
         self.assertEqual(DocumentType.objects.count(), 6)
@@ -1679,6 +1679,9 @@ class TestApiS3StorageConfig(DirectoriesMixin, APITestCase):
             ).exists(),
         )
         self.assertTrue(invoice.source_exists())
+        self.assertTrue(
+            Document.objects.filter(created__year__lte=2011).exists(),
+        )
 
     def test_demo_pdf_generation_uses_gotenberg_html_to_pdf(self):
         response = mock.Mock(content=b"%PDF-1.4 demo")

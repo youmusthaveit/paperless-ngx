@@ -34,6 +34,9 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
 
+_demo_pdf_rendering_available: bool | None = None
+
+
 def _escape_pdf_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -192,6 +195,25 @@ def _render_html_to_pdf_bytes(html_path: Path) -> bytes:
             .run()
         )
     return response.content
+
+
+def _render_demo_pdf_bytes(
+    html_path: Path,
+    display_lines: tuple[str, ...],
+) -> bytes:
+    global _demo_pdf_rendering_available
+
+    if _demo_pdf_rendering_available is False:
+        return build_simple_pdf(list(display_lines))
+
+    try:
+        pdf_bytes = _render_html_to_pdf_bytes(html_path)
+    except Exception:
+        _demo_pdf_rendering_available = False
+        return build_simple_pdf(list(display_lines))
+    else:
+        _demo_pdf_rendering_available = True
+        return pdf_bytes
 
 
 def _html_to_display_lines(html_text: str) -> tuple[str, ...]:
@@ -605,6 +627,711 @@ def _build_demo_document_spec(
     )
 
 
+def _build_additional_demo_document_specs() -> list[DemoDocumentSpec]:
+    project_cases = [
+        (
+            "familienbad-birkenweg",
+            "Modernisierung Familienbad",
+            "Familie Becker",
+            "privat",
+            "Kunden/Privat",
+            ("bad", "privatkunde"),
+            "Birkenweg 14, 60311 Frankfurt",
+        ),
+        (
+            "werkhalle-west",
+            "Heizungsmodernisierung Werkhalle",
+            "Wagner Holzbau",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("heizung", "gewerbe"),
+            "Werkhalle West, Tor 3",
+        ),
+        (
+            "kita-sonnenweg",
+            "Sicherheitsbeleuchtung Kita",
+            "Kindertagesstaette Sonnenweg",
+            "oeffentlich",
+            "Kunden/Gewerbe",
+            ("elektrik", "oeffentlich"),
+            "Sonnenweg 5, 60439 Frankfurt",
+        ),
+        (
+            "hotel-lindenhof",
+            "Sanitaerwartung Hotel",
+            "Stadthalle West",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("wartung", "gewerbe"),
+            "Hotel Lindenhof, Empfang Nord",
+        ),
+        (
+            "hauptstrasse-18",
+            "Dachsanierung Verwaltungsobjekt",
+            "Lindner Immobilienverwaltung",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("sanierung", "gewerbe"),
+            "Hauptstrasse 18, Gebaeude A",
+        ),
+        (
+            "cafe-am-markt",
+            "Heizungsservice Cafe",
+            "Cafe am Markt",
+            "gewerbe",
+            "Service/Notdienst",
+            ("wartung", "heizung"),
+            "Rathausplatz 8, 60313 Frankfurt",
+        ),
+        (
+            "industriestrasse-7",
+            "Warmwasseranlage Produktionshalle",
+            "Klein & Sohn GmbH",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("heizung", "dringend"),
+            "Industriestrasse 7, Halle 2",
+        ),
+        (
+            "stadtwerke-nord",
+            "Rohrnetz Wartung Nord",
+            "Stadtwerke Nord",
+            "oeffentlich",
+            "Service/Notdienst",
+            ("heizung", "oeffentlich"),
+            "Versorgungsring Nord 12",
+        ),
+        (
+            "neubau-wiesengrund",
+            "Elektroinstallation Neubau",
+            "Schulz Elektrotechnik",
+            "gewerbe",
+            "Baustellen",
+            ("elektrik", "material"),
+            "Im Wiesengrund 22, Haus B",
+        ),
+        (
+            "architektur-musterwohnung",
+            "Ausbau Musterwohnung Ost",
+            "Meyer & Partner Architektur",
+            "gewerbe",
+            "Baustellen",
+            ("sanierung", "object"),
+            "Musterwohnung Ost, 3. OG",
+        ),
+        (
+            "heiztechnik-rathaus",
+            "Notdienst Kesselraum Rathaus",
+            "Heiztechnik Weber",
+            "oeffentlich",
+            "Service/Notdienst",
+            ("notdienst", "heizung"),
+            "Rathausplatz 1, Kesselraum",
+        ),
+        (
+            "bauzentrum-lager-nord",
+            "Materialbereitstellung Lager Nord",
+            "Bauzentrum Nord GmbH",
+            "gewerbe",
+            "Lieferanten",
+            ("material", "gewerbe"),
+            "Lager Nord, Tor 6",
+        ),
+        (
+            "verwaltung-rosenweg",
+            "Badsanierung Rosenweg",
+            "Familie Becker",
+            "privat",
+            "Kunden/Privat",
+            ("bad", "sanierung"),
+            "Rosenweg 5, 60385 Frankfurt",
+        ),
+        (
+            "stadthalle-technik",
+            "Technikraum Stadthalle",
+            "Stadthalle West",
+            "oeffentlich",
+            "Verwaltung",
+            ("elektrik", "wartung"),
+            "Stadthalle West, Technikraum",
+        ),
+        (
+            "wohnanlage-west",
+            "Instandsetzung Wohnanlage",
+            "Lindner Immobilienverwaltung",
+            "gewerbe",
+            "Baustellen",
+            ("sanierung", "material"),
+            "Wohnanlage West, Haus 4",
+        ),
+        (
+            "servicehof-cafe",
+            "Warmwasser Servicehof Cafe",
+            "Cafe am Markt",
+            "gewerbe",
+            "Service/Notdienst",
+            ("heizung", "service"),
+            "Servicehof, Rathausplatz 8",
+        ),
+        (
+            "holzbau-lager",
+            "Werkstattumbau Holzbau",
+            "Wagner Holzbau",
+            "gewerbe",
+            "Baustellen",
+            ("montage", "material"),
+            "Werkstattlager, Abschnitt C",
+        ),
+        (
+            "kita-verwaltung",
+            "Pruefprotokolle Kita",
+            "Kindertagesstaette Sonnenweg",
+            "oeffentlich",
+            "Verwaltung",
+            ("wartung", "oeffentlich"),
+            "Sonnenweg 5, Bueroleitung",
+        ),
+        (
+            "lieferung-ventile",
+            "Armaturenlieferung Nord",
+            "Stadtwerke Nord",
+            "oeffentlich",
+            "Lieferanten",
+            ("material", "heizung"),
+            "Versorgungsring Nord 12, Lager",
+        ),
+        (
+            "buero-klein-sohn",
+            "Buchhaltung Klein und Sohn",
+            "Klein & Sohn GmbH",
+            "gewerbe",
+            "Verwaltung",
+            ("rechnung", "dringend"),
+            "Industriestrasse 7, Verwaltung",
+        ),
+    ]
+
+    variant_templates = [
+        {
+            "doc_type": "Angebot",
+            "title_prefix": "Angebot",
+            "slug_prefix": "angebot",
+            "tags": ("angebot",),
+            "amount": 1480,
+            "rows": (
+                "Baustelleneinrichtung und Absicherung",
+                "Montage und technische Ausfuehrung",
+                "Dokumentation und Abschlusskontrolle",
+            ),
+            "totals": (
+                "Gueltig fuer 21 Tg. ab Dokumentdatum",
+                "Ausfuehrung nach Terminfreigabe",
+            ),
+            "notes": ("Bitte Freigabe per E-Mail, telefonisch bestaetigen.",),
+        },
+        {
+            "doc_type": "Auftragsbestaetigung",
+            "title_prefix": "Auftragsbestaetigung",
+            "slug_prefix": "auftrag",
+            "tags": ("auftrag",),
+            "amount": 1560,
+            "rows": (
+                "Leistungsumfang und Materialeinsatz freigegeben",
+                "Ausfuehrung in abgestimmtem Zeitfenster",
+                "Abschluss mit Funktionspruefung",
+            ),
+            "totals": ("Terminfenster abgestimmt und reserviert",),
+            "notes": ("Zugang bitte am Einsatztag ab 07:30 Uhr sicherstellen.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Rechnung",
+            "slug_prefix": "rechnung",
+            "tags": ("rechnung",),
+            "amount": 1720,
+            "rows": (
+                "Arbeitsleistung laut Freigabe",
+                "Material und Kleinverbrauch",
+                "Abnahme und Dokumentationspaket",
+            ),
+            "totals": (
+                "Zahlbar innerhalb von 14 Tagen",
+                "Bitte Rechnungsnummer bei Ueberweisung angeben",
+            ),
+            "notes": ("Vielen Dank fuer den Auftrag.",),
+        },
+        {
+            "doc_type": "Lieferschein",
+            "title_prefix": "Lieferschein",
+            "slug_prefix": "lieferschein",
+            "tags": ("material",),
+            "amount": 0,
+            "rows": (
+                "Material fuer Einsatz vorbereitet",
+                "Ausgabe an Montageteam dokumentiert",
+                "Restmengen nach Einsatz rueckmelden",
+            ),
+            "totals": (),
+            "notes": ("Keine Berechnung, dient nur dem Materialnachweis.",),
+        },
+        {
+            "doc_type": "Stundennachweis",
+            "title_prefix": "Stundennachweis",
+            "slug_prefix": "stunden",
+            "tags": ("montage",),
+            "amount": 0,
+            "rows": (
+                "07:30-10:15 Vorbereitung und Aufbau",
+                "10:30-13:00 Hauptleistung ausgefuehrt",
+                "13:45-16:00 Kontrolle und Uebergabe",
+            ),
+            "totals": (),
+            "notes": ("Zeiten wurden durch den Vorarbeiter bestaetigt.",),
+        },
+        {
+            "doc_type": "Wartungsbericht",
+            "title_prefix": "Wartungsbericht",
+            "slug_prefix": "wartung",
+            "tags": ("wartung",),
+            "amount": 0,
+            "rows": (
+                "Sichtpruefung und Funktionskontrolle",
+                "Verschleissteile geprueft",
+                "Empfehlungen dokumentiert",
+            ),
+            "totals": (),
+            "notes": ("Naechster Turnus nach Betriebsbuch einplanen.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Abschlagsrechnung",
+            "slug_prefix": "abschlag",
+            "tags": ("rechnung", "object"),
+            "amount": 1940,
+            "rows": (
+                "Teilabschnitt 1 abgeschlossen",
+                "Materialnachweis und Zwischenabnahme",
+                "Abschlag gemaess Baufortschritt",
+            ),
+            "totals": (
+                "Zahlbar innerhalb von 10 Tagen",
+                "Teilrechnung gemaess Bauzeitenplan",
+            ),
+            "notes": ("Weitere Teilleistung folgt nach Abschnittsfreigabe.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Zahlungserinnerung",
+            "slug_prefix": "erinnerung",
+            "tags": ("rechnung", "dringend"),
+            "amount": 2130,
+            "rows": (
+                "Oftener Rechnungsbetrag laut Buchhaltung",
+                "Leistung bereits vollstaendig erbracht",
+                "Bitte Zahlungsziel beachten",
+            ),
+            "totals": (
+                "Mahnstufe 1 ohne Zusatzkosten",
+                "Rueckfragen bitte an die Verwaltung",
+            ),
+            "notes": ("Dieses Schreiben wurde automatisch erstellt.",),
+        },
+    ]
+
+    additional_documents: list[DemoDocumentSpec] = []
+    start_date = date(2026, 4, 14)
+
+    for project_index, case in enumerate(project_cases, start=1):
+        (
+            case_slug,
+            case_title,
+            correspondent,
+            customer_type,
+            default_storage_path,
+            case_tags,
+            project_address,
+        ) = case
+
+        for variant_index, template in enumerate(variant_templates, start=1):
+            current_date = start_date + datetime.timedelta(
+                days=((project_index - 1) * len(variant_templates))
+                + (variant_index - 1),
+            )
+            amount = (
+                f"EUR {template['amount'] + (project_index * 37) + (variant_index * 11):.2f}"
+                if template["amount"]
+                else None
+            )
+            doc_no = (
+                f"{template['slug_prefix'][:3].upper()}-2026-"
+                f"{project_index:02d}{variant_index:02d}"
+            )
+            title = f"{template['title_prefix']} {case_title} {project_index:02d}-{variant_index}"
+            storage_path = (
+                "Service/Notdienst"
+                if "notdienst" in case_tags
+                and template["doc_type"] in {"Rechnung", "Wartungsbericht"}
+                else default_storage_path
+            )
+            tags = template["tags"] + case_tags
+            subject = f"{case_title} fuer {project_address}"
+            rows = tuple(
+                f"{row} fuer Abschnitt {project_index:02d}-{variant_index}"
+                for row in template["rows"]
+            )
+            totals = tuple(template["totals"])
+            if amount is not None and template["doc_type"] == "Angebot":
+                totals += (f"Netto gesamt {amount.replace('EUR ', '')}",)
+            elif amount is not None and template["doc_type"] == "Auftragsbestaetigung":
+                totals += (f"Freigegebener Netto-Betrag {amount.replace('EUR ', '')}",)
+            elif amount is not None and template["doc_type"] == "Rechnung":
+                totals += (f"Oftener Netto-Betrag {amount.replace('EUR ', '')}",)
+
+            custom_fields = [
+                DemoCustomFieldValue("Auftragsnummer", doc_no),
+                DemoCustomFieldValue("Bauort", project_address),
+                DemoCustomFieldValue("Kundentyp", customer_type),
+            ]
+            if amount is not None:
+                custom_fields.append(
+                    DemoCustomFieldValue("Netto-Betrag", amount),
+                )
+                custom_fields.append(
+                    DemoCustomFieldValue(
+                        "Faelligkeit",
+                        current_date + datetime.timedelta(days=14),
+                    ),
+                )
+            if "dringend" in tags or "notdienst" in tags:
+                custom_fields.append(
+                    DemoCustomFieldValue(field_name="Eilauftrag", value=True),
+                )
+
+            additional_documents.append(
+                _build_demo_document_spec(
+                    date_=current_date,
+                    slug=f"{template['slug_prefix']}-{case_slug}-{project_index:02d}-{variant_index}",
+                    title=title,
+                    correspondent=correspondent,
+                    document_type=template["doc_type"],
+                    storage_path=storage_path,
+                    tags=tags,
+                    doc_no=doc_no,
+                    subject=subject,
+                    project=project_address,
+                    rows=rows,
+                    totals=totals,
+                    notes=template["notes"],
+                    custom_fields=tuple(custom_fields),
+                ),
+            )
+
+    return additional_documents
+
+
+def _build_historical_demo_document_specs() -> list[DemoDocumentSpec]:
+    historical_cases = [
+        (
+            "altbau-bad",
+            "Altbau Badsanierung",
+            "Familie Becker",
+            "privat",
+            "Kunden/Privat",
+            ("bad", "privatkunde", "sanierung"),
+            "Altbau Birkenweg 14",
+        ),
+        (
+            "heizzentrale-rathaus",
+            "Heizzentrale Rathaus",
+            "Stadtwerke Nord",
+            "oeffentlich",
+            "Service/Notdienst",
+            ("heizung", "oeffentlich", "wartung"),
+            "Rathausplatz 1, Technikzentrale",
+        ),
+        (
+            "werkhalle-brennwert",
+            "Werkhalle Brennwertanlage",
+            "Wagner Holzbau",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("heizung", "gewerbe", "montage"),
+            "Werkhalle West",
+        ),
+        (
+            "hotel-sanitaer",
+            "Hotel Sanitaertrakt",
+            "Stadthalle West",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("wartung", "gewerbe", "bad"),
+            "Hotel Lindenhof",
+        ),
+        (
+            "kita-elektro",
+            "Kita Elektrobereich",
+            "Kindertagesstaette Sonnenweg",
+            "oeffentlich",
+            "Verwaltung",
+            ("elektrik", "oeffentlich", "wartung"),
+            "Sonnenweg 5",
+        ),
+        (
+            "immobilien-dach",
+            "Wohnanlage Dachinstandsetzung",
+            "Lindner Immobilienverwaltung",
+            "gewerbe",
+            "Baustellen",
+            ("sanierung", "gewerbe", "object"),
+            "Hauptstrasse 18",
+        ),
+        (
+            "cafe-heizung",
+            "Cafe Heizungsservice",
+            "Cafe am Markt",
+            "gewerbe",
+            "Service/Notdienst",
+            ("service", "heizung", "gewerbe"),
+            "Rathausplatz 8",
+        ),
+        (
+            "industrie-warmwasser",
+            "Produktionshalle Warmwasser",
+            "Klein & Sohn GmbH",
+            "gewerbe",
+            "Kunden/Gewerbe",
+            ("heizung", "dringend", "gewerbe"),
+            "Industriestrasse 7",
+        ),
+        (
+            "neubau-elektro",
+            "Neubau Elektroinstallation",
+            "Schulz Elektrotechnik",
+            "gewerbe",
+            "Baustellen",
+            ("elektrik", "material", "gewerbe"),
+            "Im Wiesengrund 22",
+        ),
+        (
+            "lager-material",
+            "Lager Materialbereitstellung",
+            "Bauzentrum Nord GmbH",
+            "gewerbe",
+            "Lieferanten",
+            ("material", "gewerbe"),
+            "Lager Nord",
+        ),
+    ]
+
+    historical_templates = [
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Archivrechnung",
+            "slug_prefix": "archivrechnung",
+            "tags": ("rechnung",),
+            "amount": 1280,
+            "rows": (
+                "Leistung gemaess abgeschlossenem Einsatz",
+                "Materialeinsatz und Verbrauch dokumentiert",
+                "Abnahmeprotokoll archiviert",
+            ),
+            "notes": ("Archivbeleg aus dem Jahresabschluss.",),
+        },
+        {
+            "doc_type": "Lieferschein",
+            "title_prefix": "Archivlieferschein",
+            "slug_prefix": "archivlieferschein",
+            "tags": ("material",),
+            "amount": 0,
+            "rows": (
+                "Materialausgabe dokumentiert",
+                "Warenannahme durch Monteur bestaetigt",
+                "Restmengen im Lager verbucht",
+            ),
+            "notes": ("Historischer Materialnachweis.",),
+        },
+        {
+            "doc_type": "Stundennachweis",
+            "title_prefix": "Archivstundennachweis",
+            "slug_prefix": "archivstunden",
+            "tags": ("montage",),
+            "amount": 0,
+            "rows": (
+                "07:00-09:45 Vorbereitung und Einrichtung",
+                "10:00-13:15 Montage und Anpassungen",
+                "14:00-16:00 Abschluss und Reinigung",
+            ),
+            "notes": ("Zeitnachweis aus dem Altarchiv.",),
+        },
+        {
+            "doc_type": "Wartungsbericht",
+            "title_prefix": "Archivwartungsbericht",
+            "slug_prefix": "archivwartung",
+            "tags": ("wartung",),
+            "amount": 0,
+            "rows": (
+                "Funktionspruefung durchgefuehrt",
+                "Verschleiss kontrolliert",
+                "Empfehlungen fuer Folgetermin notiert",
+            ),
+            "notes": ("Bericht aus dem Servicearchiv.",),
+        },
+        {
+            "doc_type": "Angebot",
+            "title_prefix": "Archivangebot",
+            "slug_prefix": "archivangebot",
+            "tags": ("angebot",),
+            "amount": 1440,
+            "rows": (
+                "Leistungsbeschreibung archiviert",
+                "Kalkulation fuer Altprojekt dokumentiert",
+                "Ausfuehrung damals optional angeboten",
+            ),
+            "notes": ("Angebot aus einem historischen Projektstand.",),
+        },
+        {
+            "doc_type": "Auftragsbestaetigung",
+            "title_prefix": "Archivauftrag",
+            "slug_prefix": "archivauftrag",
+            "tags": ("auftrag",),
+            "amount": 1510,
+            "rows": (
+                "Beauftragter Leistungsumfang",
+                "Zeitfenster und Zugang abgestimmt",
+                "Abschlussdokumentation vorbereitet",
+            ),
+            "notes": ("Auftragsbestaetigung fuer Altprojekt.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Altfall Zahlungserinnerung",
+            "slug_prefix": "altfall-erinnerung",
+            "tags": ("rechnung", "dringend"),
+            "amount": 1670,
+            "rows": (
+                "Oftener Betrag laut damaliger Buchhaltung",
+                "Leistung bereits abgeschlossen",
+                "Bitte Archivvorgang pruefen",
+            ),
+            "notes": ("Historische Zahlungserinnerung aus dem Archive.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Abschlagsrechnung Altprojekt",
+            "slug_prefix": "altprojekt-abschlag",
+            "tags": ("rechnung", "object"),
+            "amount": 1735,
+            "rows": (
+                "Teilabschnitt im Altprojekt abgeschlossen",
+                "Zwischenstand mit Materialnachweis",
+                "Abrechnung nach Baufortschritt",
+            ),
+            "notes": ("Teilrechnung aus einem archivierten Projekt.",),
+        },
+        {
+            "doc_type": "Rechnung",
+            "title_prefix": "Serviceabrechnung Archive",
+            "slug_prefix": "serviceabrechnung",
+            "tags": ("rechnung", "service"),
+            "amount": 1395,
+            "rows": (
+                "Serviceeinsatz dokumentiert",
+                "Arbeitszeit und Ersatzteile erfasst",
+                "Uebergabe an Kunden erfolgt",
+            ),
+            "notes": ("Archivierte Serviceabrechnung.",),
+        },
+        {
+            "doc_type": "Lieferschein",
+            "title_prefix": "Notdienstmaterial Archive",
+            "slug_prefix": "archiv-notdienst",
+            "tags": ("material", "notdienst"),
+            "amount": 0,
+            "rows": (
+                "Material fuer Notfalleinsatz gepackt",
+                "Ausgabe ausserhalb der Regelzeit erfolgt",
+                "Rueckmeldung an Werkstatt erfasst",
+            ),
+            "notes": ("Historischer Notdiensteinsatz.",),
+        },
+    ]
+
+    historical_documents: list[DemoDocumentSpec] = []
+    start_year = 2011
+
+    for case_index, case in enumerate(historical_cases, start=1):
+        (
+            case_slug,
+            case_title,
+            correspondent,
+            customer_type,
+            storage_path,
+            case_tags,
+            project_address,
+        ) = case
+
+        for template_index, template in enumerate(historical_templates, start=1):
+            year = start_year + ((case_index + template_index - 2) % 15)
+            month = ((case_index * 3 + template_index) % 12) + 1
+            day = ((case_index * 2 + template_index * 3) % 28) + 1
+            created = date(year, month, day)
+            doc_no = f"HIS-{year}-{case_index:02d}{template_index:02d}"
+            amount = (
+                f"EUR {template['amount'] + (case_index * 24) + (template_index * 9):.2f}"
+                if template["amount"]
+                else None
+            )
+            totals: tuple[str, ...] = ()
+            if amount is not None and template["doc_type"] == "Angebot":
+                totals = (f"Netto gesamt {amount.replace('EUR ', '')}",)
+            elif amount is not None and template["doc_type"] == "Auftragsbestaetigung":
+                totals = (f"Freigegebener Netto-Betrag {amount.replace('EUR ', '')}",)
+            elif amount is not None and template["doc_type"] == "Rechnung":
+                totals = (
+                    f"Oftener Netto-Betrag {amount.replace('EUR ', '')}",
+                    "Archiviert fuer steuerliche Aufbewahrung",
+                )
+
+            custom_fields = [
+                DemoCustomFieldValue("Auftragsnummer", doc_no),
+                DemoCustomFieldValue("Bauort", project_address),
+                DemoCustomFieldValue("Kundentyp", customer_type),
+            ]
+            if amount is not None:
+                custom_fields.append(DemoCustomFieldValue("Netto-Betrag", amount))
+                custom_fields.append(
+                    DemoCustomFieldValue(
+                        "Faelligkeit",
+                        created + datetime.timedelta(days=14),
+                    ),
+                )
+            if "dringend" in template["tags"] or "notdienst" in template["tags"]:
+                custom_fields.append(
+                    DemoCustomFieldValue(field_name="Eilauftrag", value=True),
+                )
+
+            historical_documents.append(
+                _build_demo_document_spec(
+                    date_=created,
+                    slug=f"{template['slug_prefix']}-{case_slug}-{year}-{case_index:02d}-{template_index}",
+                    title=f"{template['title_prefix']} {case_title} {year}",
+                    correspondent=correspondent,
+                    document_type=template["doc_type"],
+                    storage_path=storage_path,
+                    tags=template["tags"] + case_tags,
+                    doc_no=doc_no,
+                    subject=f"{case_title} aus dem Archivjahr {year}",
+                    project=project_address,
+                    rows=tuple(f"{row} ({year})" for row in template["rows"]),
+                    totals=totals,
+                    notes=template["notes"],
+                    custom_fields=tuple(custom_fields),
+                ),
+            )
+
+    return historical_documents
+
+
 def _upsert_document(
     spec: DemoDocumentSpec,
     *,
@@ -619,10 +1346,7 @@ def _upsert_document(
         html_path = Path(tmpdir) / Path(spec.filename).with_suffix(".html").name
         html_path.write_text(spec.content_html, encoding="utf-8")
         display_lines = _html_to_display_lines(html_path.read_text(encoding="utf-8"))
-        try:
-            pdf_bytes = _render_html_to_pdf_bytes(html_path)
-        except Exception:
-            pdf_bytes = build_simple_pdf(list(display_lines))
+        pdf_bytes = _render_demo_pdf_bytes(html_path, display_lines)
         checksum = hashlib.sha256(pdf_bytes).hexdigest()
     defaults = {
         "title": spec.title,
@@ -679,6 +1403,9 @@ def _upsert_document(
 
 
 def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
+    global _demo_pdf_rendering_available
+    _demo_pdf_rendering_available = None
+
     correspondent_names = [
         "Bauzentrum Nord GmbH",
         "Cafe am Markt",
@@ -1974,6 +2701,9 @@ def seed_handwerksbetrieb_demo_data(*, owner: User | None = None) -> str:
                 custom_fields=item[13],
             ),
         )
+
+    demo_documents.extend(_build_additional_demo_document_specs())
+    demo_documents.extend(_build_historical_demo_document_specs())
 
     created_count = 0
     for spec in demo_documents:
