@@ -3684,16 +3684,19 @@ class TestWorkflows(
 
         run_workflows(WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED, doc)
 
-        mock_post.assert_called_once_with(
-            url="http://paperless-ngx.com",
-            data=(
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.kwargs["url"], "http://paperless-ngx.com")
+        self.assertEqual(
+            mock_post.call_args.kwargs["data"],
+            (
                 f"Test message: http://localhost:8000/paperless/documents/{doc.id}/"
                 f" with id {doc.id}"
             ),
-            headers={},
-            files=None,
-            as_json=False,
         )
+        self.assertEqual(mock_post.call_args.kwargs["headers"], {})
+        self.assertIsNone(mock_post.call_args.kwargs["files"])
+        self.assertFalse(mock_post.call_args.kwargs["as_json"])
+        self.assertIsInstance(mock_post.call_args.kwargs["run_step_id"], int)
 
     @override_settings(
         PAPERLESS_URL="http://localhost:8000",
@@ -3749,13 +3752,19 @@ class TestWorkflows(
 
         run_workflows(WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED, doc)
 
-        mock_post.assert_called_once_with(
-            url="http://paperless-ngx.com",
-            data=f"Test message: http://localhost:8000/documents/{doc.id}/",
-            headers={},
-            files={"file": ("simple.pdf", mock.ANY, "application/pdf")},
-            as_json=False,
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.kwargs["url"], "http://paperless-ngx.com")
+        self.assertEqual(
+            mock_post.call_args.kwargs["data"],
+            f"Test message: http://localhost:8000/documents/{doc.id}/",
         )
+        self.assertEqual(mock_post.call_args.kwargs["headers"], {})
+        self.assertEqual(
+            mock_post.call_args.kwargs["files"],
+            {"file": ("simple.pdf", mock.ANY, "application/pdf")},
+        )
+        self.assertFalse(mock_post.call_args.kwargs["as_json"])
+        self.assertIsInstance(mock_post.call_args.kwargs["run_step_id"], int)
 
     @override_settings(
         PAPERLESS_URL="http://localhost:8000",

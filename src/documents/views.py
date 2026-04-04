@@ -107,6 +107,7 @@ from rest_framework.viewsets import ViewSet
 
 from documents import bulk_edit
 from documents import index
+from documents import matching
 from documents.bulk_download import ArchiveOnlyStrategy
 from documents.bulk_download import OriginalAndArchiveStrategy
 from documents.bulk_download import OriginalsOnlyStrategy
@@ -163,6 +164,7 @@ from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
+from documents.models import WorkflowRun
 from documents.models import WorkflowTrigger
 from documents.parsers import ParseError
 from documents.parsers import is_mime_type_supported
@@ -192,6 +194,8 @@ from documents.serialisers import DocumentVersionLabelSerializer
 from documents.serialisers import DocumentVersionSerializer
 from documents.serialisers import EditPdfDocumentsSerializer
 from documents.serialisers import EmailSerializer
+from documents.serialisers import ManualWorkflowRunSerializer
+from documents.serialisers import ManualWorkflowSummarySerializer
 from documents.serialisers import MergeDocumentsSerializer
 from documents.serialisers import NotesSerializer
 from documents.serialisers import PostDocumentSerializer
@@ -211,9 +215,11 @@ from documents.serialisers import TasksViewSerializer
 from documents.serialisers import TrashSerializer
 from documents.serialisers import UiSettingsViewSerializer
 from documents.serialisers import WorkflowActionSerializer
+from documents.serialisers import WorkflowRunHistorySerializer
 from documents.serialisers import WorkflowSerializer
 from documents.serialisers import WorkflowTriggerSerializer
 from documents.signals import document_updated
+from documents.signals.handlers import run_workflows
 from documents.storage import test_s3_connection
 from documents.tasks import build_share_link_bundle
 from documents.tasks import consume_file
@@ -1852,6 +1858,137 @@ class DocumentViewSet(
         ):
             raise Http404
         return version_doc
+
+    @extend_schema(
+        operation_id="documents_list_manual_workflows",
+        responses=ManualWorkflowSummarySerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="manual-workflows")
+    def manual_workflows(self, request, pk=None):
+        document = self.get_object()
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "view_document",
+            document,
+        ):
+            return HttpResponseForbidden("Insufficient permissions")
+
+        workflows = (
+            Workflow.objects.filter(
+                enabled=True,
+                triggers__type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            )
+            .prefetch_related("triggers")
+            .order_by("order", "name")
+            .distinct()
+        )
+
+        matching_workflows = [
+            workflow
+            for workflow in workflows
+            if matching.document_matches_workflow(
+                document,
+                workflow,
+                WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            )
+        ]
+
+        return Response(
+            ManualWorkflowSummarySerializer(
+                matching_workflows,
+                many=True,
+            ).data,
+        )
+
+    @extend_schema(
+        operation_id="documents_run_manual_workflow",
+        request=ManualWorkflowRunSerializer,
+        responses=inline_serializer(
+            name="ManualWorkflowRunResult",
+            fields={
+                "workflow_id": serializers.IntegerField(),
+                "workflow_name": serializers.CharField(),
+                "status": serializers.CharField(),
+            },
+        ),
+    )
+    @action(detail=True, methods=["post"], url_path="run-workflow")
+    def run_workflow(self, request, pk=None):
+        document = self.get_object()
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "change_document",
+            document,
+        ):
+            return HttpResponseForbidden("Insufficient permissions")
+
+        serializer = ManualWorkflowRunSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        workflow = get_object_or_404(
+            Workflow.objects.prefetch_related("triggers", "actions"),
+            pk=serializer.validated_data["workflow_id"],
+            enabled=True,
+        )
+
+        if not workflow.triggers.filter(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+        ).exists():
+            raise ValidationError(
+                {"workflow_id": "Workflow is not configured for manual execution."},
+            )
+
+        if not matching.document_matches_workflow(
+            document,
+            workflow,
+            WorkflowTrigger.WorkflowTriggerType.MANUAL,
+        ):
+            raise ValidationError(
+                {"workflow_id": "Document does not match the workflow filters."},
+            )
+
+        run_workflows(
+            WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            document,
+            workflow_to_run=workflow,
+            started_by=request.user if request.user.is_authenticated else None,
+        )
+        document.refresh_from_db()
+
+        return Response(
+            {
+                "workflow_id": workflow.id,
+                "workflow_name": workflow.name,
+                "status": "started",
+            },
+        )
+
+    @extend_schema(
+        operation_id="documents_workflow_runs",
+        responses=WorkflowRunHistorySerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="workflow-runs")
+    def workflow_runs(self, request, pk=None):
+        document = self.get_object()
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "view_document",
+            document,
+        ):
+            return HttpResponseForbidden("Insufficient permissions")
+
+        runs = (
+            WorkflowRun.objects.filter(document=document)
+            .select_related("workflow", "started_by")
+            .prefetch_related("steps__action")
+            .order_by("-started_at", "-pk")
+        )
+        return Response(
+            WorkflowRunHistorySerializer(
+                runs,
+                many=True,
+            ).data,
+        )
 
     @extend_schema(
         operation_id="documents_delete_version",

@@ -60,6 +60,7 @@ import { StoragePath } from 'src/app/data/storage-path'
 import { Tag } from 'src/app/data/tag'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import { User } from 'src/app/data/user'
+import { ManualWorkflowSummary } from 'src/app/data/workflow'
 import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
 import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
 import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
@@ -300,6 +301,8 @@ export class DocumentDetailComponent
 
   public downloading: boolean = false
   public useFormattedFilename: boolean = false
+  public manualWorkflows: ManualWorkflowSummary[] = []
+  public manualWorkflowRunningId: number | null = null
 
   public readonly CustomFieldDataType = CustomFieldDataType
 
@@ -894,6 +897,7 @@ export class DocumentDetailComponent
 
   updateComponent(doc: Document) {
     this.document = doc
+    this.loadManualWorkflows()
     // Default selected version is the newest version
     const versions = doc.versions ?? []
     this.selectedVersionId = versions.length
@@ -1107,6 +1111,68 @@ export class DocumentDetailComponent
         PermissionType.Document
       )
     )
+  }
+
+  canRunManualWorkflows(): boolean {
+    return (
+      !!this.document?.id &&
+      this.permissionsService.currentUserHasObjectPermissions(
+        PermissionAction.Change,
+        this.document
+      ) &&
+      this.permissionsService.currentUserCan(
+        PermissionAction.Change,
+        PermissionType.Document
+      )
+    )
+  }
+
+  private loadManualWorkflows(): void {
+    if (!this.document?.id || !this.canRunManualWorkflows()) {
+      this.manualWorkflows = []
+      return
+    }
+
+    this.documentsService
+      .getManualWorkflows(this.document.id)
+      .pipe(
+        first(),
+        takeUntil(this.unsubscribeNotifier),
+        takeUntil(this.docChangeNotifier)
+      )
+      .subscribe({
+        next: (workflows) => {
+          this.manualWorkflows = workflows
+        },
+        error: (error) => {
+          this.manualWorkflows = []
+          this.toastService.showError($localize`Error loading workflows`, error)
+        },
+      })
+  }
+
+  runManualWorkflow(workflow: ManualWorkflowSummary): void {
+    if (!this.document?.id || this.manualWorkflowRunningId !== null) {
+      return
+    }
+
+    this.manualWorkflowRunningId = workflow.id
+    this.documentsService
+      .runManualWorkflow(this.document.id, workflow.id)
+      .pipe(first(), takeUntil(this.unsubscribeNotifier))
+      .subscribe({
+        next: () => {
+          this.manualWorkflowRunningId = null
+          this.toastService.showInfo(
+            $localize`Workflow "${workflow.name}" started`
+          )
+          this.reloadRemoteVersion()
+        },
+        error: (error) => {
+          this.manualWorkflowRunningId = null
+          this.toastService.showError($localize`Error starting workflow`, error)
+        },
+      })
   }
 
   canDeleteDocument(): boolean {
@@ -1837,7 +1903,6 @@ export class DocumentDetailComponent
 
   get historyEnabled(): boolean {
     return (
-      this.settings.get(SETTINGS_KEYS.AUDITLOG_ENABLED) &&
       this.userIsOwner &&
       this.permissionsService.currentUserCan(
         PermissionAction.View,

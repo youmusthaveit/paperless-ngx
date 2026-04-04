@@ -14,6 +14,10 @@ import { DocumentSuggestions } from 'src/app/data/document-suggestions'
 import { FilterRule } from 'src/app/data/filter-rule'
 import { Results } from 'src/app/data/results'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
+import {
+  ManualWorkflowSummary,
+  WorkflowRunHistory,
+} from 'src/app/data/workflow'
 import { queryParamsFromFilterRules } from '../../utils/query-params'
 import {
   PermissionAction,
@@ -79,6 +83,12 @@ export interface RemovePasswordDocumentsRequest {
   delete_original?: boolean
   include_metadata?: boolean
   source_mode?: BulkEditSourceMode
+}
+
+export interface RunManualWorkflowResponse {
+  workflow_id: number
+  workflow_name: string
+  status: string
 }
 
 @Injectable({
@@ -458,8 +468,30 @@ export class DocumentService extends AbstractPaperlessService<Document> {
     )
   }
 
+  getManualWorkflows(id: number): Observable<ManualWorkflowSummary[]> {
+    return this.http.get<ManualWorkflowSummary[]>(
+      this.getResourceUrl(id, 'manual-workflows')
+    )
+  }
+
+  runManualWorkflow(
+    id: number,
+    workflowId: number
+  ): Observable<RunManualWorkflowResponse> {
+    return this.http.post<RunManualWorkflowResponse>(
+      this.getResourceUrl(id, 'run-workflow'),
+      { workflow_id: workflowId }
+    )
+  }
+
   getHistory(id: number): Observable<AuditLogEntry[]> {
     return this.http.get<AuditLogEntry[]>(this.getResourceUrl(id, 'history'))
+  }
+
+  getWorkflowRuns(id: number): Observable<WorkflowRunHistory[]> {
+    return this.http.get<WorkflowRunHistory[]>(
+      this.getResourceUrl(id, 'workflow-runs')
+    )
   }
 
   bulkDownload(

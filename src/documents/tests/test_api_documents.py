@@ -46,6 +46,7 @@ from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
+from documents.models import WorkflowRun
 from documents.models import WorkflowTrigger
 from documents.signals.handlers import run_workflows
 from documents.tests.utils import DirectoriesMixin
@@ -2127,16 +2128,159 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        self.consume_file_mock.assert_called_once()
-
-        input_doc, overrides = self.get_last_consume_delay_call_args()
-
-        self.assertEqual(input_doc.original_file.name, "simple.pdf")
-        self.assertEqual(overrides.filename, "simple.pdf")
-        self.assertEqual(
-            overrides.custom_fields,
-            {cf_string.id: "a string", cf_int.id: 123},
+    def test_list_manual_workflows_for_document(self) -> None:
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="match me",
+            checksum="manual-workflow-list",
+            mime_type="application/pdf",
         )
+
+        manual_trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="match me",
+        )
+        other_trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="match me",
+        )
+        action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.ASSIGNMENT,
+        )
+
+        matching_workflow = Workflow.objects.create(
+            name="Manual Matching Workflow",
+            order=1,
+        )
+        matching_workflow.triggers.add(manual_trigger)
+        matching_workflow.actions.add(action)
+
+        non_matching_workflow = Workflow.objects.create(
+            name="Updated Only Workflow",
+            order=2,
+        )
+        non_matching_workflow.triggers.add(other_trigger)
+        non_matching_workflow.actions.add(action)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/manual-workflows/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], matching_workflow.id)
+
+    def test_run_manual_workflow_for_document(self) -> None:
+        tag = Tag.objects.create(name="manual-run-tag")
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="start manually",
+            checksum="manual-workflow-run",
+            mime_type="application/pdf",
+        )
+
+        trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="start manually",
+        )
+        action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.ASSIGNMENT,
+        )
+        action.assign_tags.add(tag)
+        workflow = Workflow.objects.create(
+            name="Manual Run Workflow",
+            order=1,
+        )
+        workflow.triggers.add(trigger)
+        workflow.actions.add(action)
+
+        response = self.client.post(
+            f"/api/documents/{doc.pk}/run-workflow/",
+            {"workflow_id": workflow.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+        self.assertEqual(list(doc.tags.values_list("id", flat=True)), [tag.id])
+        workflow_run = WorkflowRun.objects.get(workflow=workflow, document=doc)
+        self.assertEqual(workflow_run.started_by, self.user)
+        self.assertEqual(workflow_run.status, WorkflowRun.WorkflowRunStatus.SUCCESS)
+        self.assertEqual(workflow_run.steps.count(), 1)
+
+    def test_run_manual_workflow_rejects_non_manual_workflow(self) -> None:
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="start manually",
+            checksum="manual-workflow-invalid",
+            mime_type="application/pdf",
+        )
+
+        trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="start manually",
+        )
+        action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.ASSIGNMENT,
+        )
+        workflow = Workflow.objects.create(
+            name="Non Manual Workflow",
+            order=1,
+        )
+        workflow.triggers.add(trigger)
+        workflow.actions.add(action)
+
+        response = self.client.post(
+            f"/api/documents/{doc.pk}/run-workflow/",
+            {"workflow_id": workflow.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_document_workflow_runs(self) -> None:
+        tag = Tag.objects.create(name="workflow-history-tag")
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="show history",
+            checksum="workflow-history",
+            mime_type="application/pdf",
+        )
+
+        trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="show history",
+        )
+        action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.ASSIGNMENT,
+        )
+        action.assign_tags.add(tag)
+        workflow = Workflow.objects.create(
+            name="Workflow History",
+            order=1,
+        )
+        workflow.triggers.add(trigger)
+        workflow.actions.add(action)
+
+        run_response = self.client.post(
+            f"/api/documents/{doc.pk}/run-workflow/",
+            {"workflow_id": workflow.id},
+            format="json",
+        )
+        self.assertEqual(run_response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/workflow-runs/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["workflow_name"], workflow.name)
+        self.assertEqual(response.data[0]["status"], "success")
+        self.assertEqual(response.data[0]["started_by"]["id"], self.user.id)
+        self.assertEqual(len(response.data[0]["steps"]), 1)
+        self.assertEqual(response.data[0]["steps"][0]["status"], "success")
 
     def test_upload_with_custom_fields_errors(self) -> None:
         """

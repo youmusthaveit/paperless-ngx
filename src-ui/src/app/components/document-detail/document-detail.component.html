@@ -96,6 +96,25 @@
         <i-bs width="1em" height="1em" name="diagram-3" class="me-1"></i-bs><span i18n>More like this</span>
       </button>
 
+      @if (manualWorkflows.length > 0) {
+        <div class="dropdown-divider"></div>
+        <h6 class="dropdown-header" i18n>Run Workflow</h6>
+        @for (workflow of manualWorkflows; track workflow.id) {
+          <button
+            ngbDropdownItem
+            (click)="runManualWorkflow(workflow)"
+            [disabled]="manualWorkflowRunningId !== null"
+          >
+            @if (manualWorkflowRunningId === workflow.id) {
+              <div class="spinner-border spinner-border-sm me-1" role="status"></div>
+            } @else {
+              <i-bs width="1em" height="1em" name="play" class="me-1"></i-bs>
+            }
+            <span>{{ workflow.name }}</span>
+          </button>
+        }
+      }
+
       <button ngbDropdownItem (click)="editPdf()" [disabled]="!userIsOwner || !userCanEdit || originalContentRenderType !== ContentRenderType.PDF">
         <i-bs name="pencil" class="me-1"></i-bs><ng-container i18n>PDF Editor</ng-container>
       </button>

@@ -2,9 +2,11 @@ import { AsyncPipe, KeyValuePipe, TitleCasePipe } from '@angular/common'
 import { Component, Input, OnInit, inject } from '@angular/core'
 import { NgbTooltipModule } from '@ng-bootstrap/ng-bootstrap'
 import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
-import { Observable, first, map, of, shareReplay } from 'rxjs'
+import { Observable, first, forkJoin, map, of, shareReplay } from 'rxjs'
+import { catchError } from 'rxjs/operators'
 import { AuditLogAction, AuditLogEntry } from 'src/app/data/auditlog-entry'
 import { DataType } from 'src/app/data/datatype'
+import { WorkflowRunHistory } from 'src/app/data/workflow'
 import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
 import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
 import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
@@ -46,6 +48,7 @@ export class DocumentHistoryComponent implements OnInit {
 
   public loading: boolean = true
   public entries: AuditLogEntry[] = []
+  public workflowRuns: WorkflowRunHistory[] = []
 
   private readonly prettyNameCache = new Map<string, Observable<string>>()
 
@@ -56,8 +59,16 @@ export class DocumentHistoryComponent implements OnInit {
   private loadHistory(): void {
     if (this._documentId) {
       this.loading = true
-      this.documentService.getHistory(this._documentId).subscribe((entries) => {
+      forkJoin({
+        entries: this.documentService
+          .getHistory(this._documentId)
+          .pipe(catchError(() => of([]))),
+        workflowRuns: this.documentService
+          .getWorkflowRuns(this._documentId)
+          .pipe(catchError(() => of([]))),
+      }).subscribe(({ entries, workflowRuns }) => {
         this.entries = entries
+        this.workflowRuns = workflowRuns
         this.loading = false
       })
     }

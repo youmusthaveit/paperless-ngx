@@ -1,7 +1,9 @@
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -22,6 +24,15 @@ from documents.templating.workflows import parse_w_workflow_placeholders
 from documents.workflows.webhooks import send_webhook
 
 logger = logging.getLogger("paperless.workflows.actions")
+
+
+@dataclass
+class WorkflowActionExecutionResult:
+    status: str
+    message: str = ""
+    error: str = ""
+    request_payload: dict[str, Any] | None = None
+    response_payload: dict[str, Any] | None = None
 
 
 def build_workflow_action_context(
@@ -91,17 +102,18 @@ def execute_email_action(
     logging_group,
     original_file: Path,
     trigger_type: WorkflowTrigger.WorkflowTriggerType,
-) -> None:
+) -> WorkflowActionExecutionResult:
     """
     Execute an email action for a workflow.
     """
 
     if not settings.EMAIL_ENABLED:
-        logger.error(
-            "Email backend has not been configured, cannot send email notifications",
-            extra={"group": logging_group},
+        error = "Email backend has not been configured, cannot send email notifications"
+        logger.error(error, extra={"group": logging_group})
+        return WorkflowActionExecutionResult(
+            status="failed",
+            error=error,
         )
-        return
 
     subject = (
         parse_w_workflow_placeholders(
@@ -181,10 +193,24 @@ def execute_email_action(
             f"Sent {n_messages} notification email(s) to {action.email.to}",
             extra={"group": logging_group},
         )
+        return WorkflowActionExecutionResult(
+            status="success",
+            message=f"Sent {n_messages} notification email(s)",
+            response_payload={
+                "messages_sent": n_messages,
+                "recipients": action.email.to.split(","),
+                "include_document": action.email.include_document,
+            },
+        )
     except Exception as e:
+        error = f"Error occurred sending notification email: {e}"
         logger.exception(
-            f"Error occurred sending notification email: {e}",
+            error,
             extra={"group": logging_group},
+        )
+        return WorkflowActionExecutionResult(
+            status="failed",
+            error=error,
         )
 
 
@@ -194,7 +220,9 @@ def execute_webhook_action(
     context: dict,
     logging_group,
     original_file: Path,
-):
+    *,
+    run_step_id: int | None = None,
+) -> WorkflowActionExecutionResult:
     try:
         data = {}
         if action.webhook.use_params:
@@ -254,21 +282,40 @@ def execute_webhook_action(
                         document.mime_type,
                     ),
                 }
-        send_webhook.delay(
-            url=action.webhook.url,
-            data=data,
-            headers=headers,
-            files=files,
-            as_json=action.webhook.as_json,
-        )
+        delay_kwargs = {
+            "url": action.webhook.url,
+            "data": data,
+            "headers": headers,
+            "files": files,
+            "as_json": action.webhook.as_json,
+        }
+        if run_step_id is not None:
+            delay_kwargs["run_step_id"] = run_step_id
+        send_webhook.delay(**delay_kwargs)
         logger.debug(
             f"Webhook to {action.webhook.url} queued",
             extra={"group": logging_group},
         )
+        return WorkflowActionExecutionResult(
+            status="running",
+            message=f"Webhook to {action.webhook.url} queued",
+            request_payload={
+                "url": action.webhook.url,
+                "headers": headers,
+                "data": data,
+                "include_document": action.webhook.include_document,
+                "as_json": action.webhook.as_json,
+            },
+        )
     except Exception as e:
+        error = f"Error occurred sending webhook: {e}"
         logger.exception(
-            f"Error occurred sending webhook: {e}",
+            error,
             extra={"group": logging_group},
+        )
+        return WorkflowActionExecutionResult(
+            status="failed",
+            error=error,
         )
 
 

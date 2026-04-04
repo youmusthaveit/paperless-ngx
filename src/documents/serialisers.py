@@ -77,6 +77,8 @@ from documents.models import Workflow
 from documents.models import WorkflowAction
 from documents.models import WorkflowActionEmail
 from documents.models import WorkflowActionWebhook
+from documents.models import WorkflowRun
+from documents.models import WorkflowRunStep
 from documents.models import WorkflowTrigger
 from documents.parsers import ParseError
 from documents.parsers import is_mime_type_supported
@@ -3481,26 +3483,80 @@ class WorkflowSerializer(serializers.ModelSerializer):
 
         return instance
 
-    def update(self, instance: Workflow, validated_data) -> Workflow:
-        triggers = validated_data.pop("triggers", serializers.empty)
-        actions = validated_data.pop("actions", serializers.empty)
 
-        instance = super().update(instance, validated_data)
+class ManualWorkflowRunSerializer(serializers.Serializer):
+    workflow_id = serializers.IntegerField(min_value=1)
 
-        self.update_triggers_and_actions(instance, triggers, actions)
-        self.prune_triggers_and_actions()
+    def validate_workflow_id(self, workflow_id: int) -> int:
+        if not Workflow.objects.filter(pk=workflow_id, enabled=True).exists():
+            raise serializers.ValidationError("Workflow does not exist or is disabled.")
+        return workflow_id
 
-        return instance
 
-    def to_representation(self, instance: Workflow) -> dict[str, Any]:
-        data = super().to_representation(instance)
-        actions = instance.actions.order_by("order", "pk")
-        data["actions"] = WorkflowActionSerializer(
-            actions,
-            many=True,
-            context=self.context,
-        ).data
-        return data
+class ManualWorkflowSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Workflow
+        fields = [
+            "id",
+            "name",
+            "order",
+        ]
+
+
+class WorkflowRunStepSerializer(serializers.ModelSerializer):
+    action_type = serializers.IntegerField(source="action.type", allow_null=True)
+
+    class Meta:
+        model = WorkflowRunStep
+        fields = [
+            "id",
+            "order",
+            "status",
+            "started_at",
+            "finished_at",
+            "message",
+            "error",
+            "request_payload",
+            "response_payload",
+            "action_type",
+        ]
+
+
+class WorkflowRunHistorySerializer(serializers.ModelSerializer):
+    workflow_id = serializers.IntegerField(source="workflow.id")
+    workflow_name = serializers.CharField(source="workflow.name")
+    started_by = serializers.SerializerMethodField()
+    trigger_type_display = serializers.CharField(source="get_type_display")
+    status_display = serializers.CharField(source="get_status_display")
+    steps = WorkflowRunStepSerializer(many=True)
+
+    class Meta:
+        model = WorkflowRun
+        fields = [
+            "id",
+            "workflow_id",
+            "workflow_name",
+            "type",
+            "trigger_type_display",
+            "status",
+            "status_display",
+            "run_at",
+            "started_at",
+            "finished_at",
+            "current_step_order",
+            "message",
+            "error",
+            "started_by",
+            "steps",
+        ]
+
+    def get_started_by(self, obj: WorkflowRun) -> dict[str, Any] | None:
+        if obj.started_by is None:
+            return None
+        return {
+            "id": obj.started_by.id,
+            "username": obj.started_by.username,
+        }
 
 
 class TrashSerializer(SerializerWithPerms):

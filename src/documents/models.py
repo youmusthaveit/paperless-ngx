@@ -1423,6 +1423,7 @@ class WorkflowTrigger(models.Model):
         DOCUMENT_ADDED = 2, _("Document Added")
         DOCUMENT_UPDATED = 3, _("Document Updated")
         SCHEDULED = 4, _("Scheduled")
+        MANUAL = 5, _("Manual")
 
     class DocumentSourceChoices(models.IntegerChoices):
         CONSUME_FOLDER = DocumentSource.ConsumeFolder.value, _("Consume Folder")
@@ -2019,6 +2020,12 @@ class Workflow(models.Model):
 
 
 class WorkflowRun(SoftDeleteModel):
+    class WorkflowRunStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        SUCCESS = "success", _("Success")
+        FAILED = "failed", _("Failed")
+
     workflow = models.ForeignKey(
         Workflow,
         on_delete=models.CASCADE,
@@ -2046,9 +2053,137 @@ class WorkflowRun(SoftDeleteModel):
         db_index=True,
     )
 
+    status = models.CharField(
+        _("status"),
+        max_length=16,
+        choices=WorkflowRunStatus.choices,
+        default=WorkflowRunStatus.SUCCESS,
+    )
+
+    started_at = models.DateTimeField(
+        _("date started"),
+        default=timezone.now,
+    )
+
+    finished_at = models.DateTimeField(
+        _("date finished"),
+        null=True,
+        blank=True,
+    )
+
+    started_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="started_workflow_runs",
+        verbose_name=_("started by"),
+    )
+
+    current_step_order = models.PositiveSmallIntegerField(
+        _("current step order"),
+        null=True,
+        blank=True,
+    )
+
+    message = models.TextField(
+        _("message"),
+        blank=True,
+        default="",
+    )
+
+    error = models.TextField(
+        _("error"),
+        blank=True,
+        default="",
+    )
+
+    result_data = models.JSONField(
+        _("result data"),
+        null=True,
+        blank=True,
+    )
+
     class Meta:
         verbose_name = _("workflow run")
         verbose_name_plural = _("workflow runs")
 
     def __str__(self) -> str:
         return f"WorkflowRun of {self.workflow} at {self.run_at} on {self.document}"
+
+
+class WorkflowRunStep(models.Model):
+    class WorkflowRunStepStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        SUCCESS = "success", _("Success")
+        FAILED = "failed", _("Failed")
+        SKIPPED = "skipped", _("Skipped")
+
+    workflow_run = models.ForeignKey(
+        WorkflowRun,
+        on_delete=models.CASCADE,
+        related_name="steps",
+        verbose_name=_("workflow run"),
+    )
+
+    action = models.ForeignKey(
+        WorkflowAction,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="run_steps",
+        verbose_name=_("workflow action"),
+    )
+
+    order = models.PositiveSmallIntegerField(_("order"))
+
+    status = models.CharField(
+        _("status"),
+        max_length=16,
+        choices=WorkflowRunStepStatus.choices,
+        default=WorkflowRunStepStatus.PENDING,
+    )
+
+    started_at = models.DateTimeField(
+        _("date started"),
+        default=timezone.now,
+    )
+
+    finished_at = models.DateTimeField(
+        _("date finished"),
+        null=True,
+        blank=True,
+    )
+
+    message = models.TextField(
+        _("message"),
+        blank=True,
+        default="",
+    )
+
+    error = models.TextField(
+        _("error"),
+        blank=True,
+        default="",
+    )
+
+    request_payload = models.JSONField(
+        _("request payload"),
+        null=True,
+        blank=True,
+    )
+
+    response_payload = models.JSONField(
+        _("response payload"),
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = _("workflow run step")
+        verbose_name_plural = _("workflow run steps")
+        ordering = ("order", "pk")
+
+    def __str__(self) -> str:
+        return f"WorkflowRunStep {self.pk} of {self.workflow_run}"

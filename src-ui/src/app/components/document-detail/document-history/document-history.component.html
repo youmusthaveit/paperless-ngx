@@ -3,59 +3,132 @@
         <output class="spinner-border spinner-border-sm fw-normal" role="status"></output>
     </div>
 } @else {
-    <ul class="list-group">
-        @if (entries.length === 0) {
-            <li class="list-group-item">
-                <div class="d-flex justify-content-center">
-                    <span class="fst-italic" i18n>No entries found.</span>
-                </div>
-            </li>
-        } @else {
-            @for (entry of entries; track entry.id) {
+    <div class="mb-3">
+        <h6 i18n>Workflow runs</h6>
+        <ul class="list-group">
+            @if (workflowRuns.length === 0) {
                 <li class="list-group-item">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <ng-template #timestamp>
-                            <div class="text-light">
-                                {{ entry.timestamp | customDate:'longDate' }} {{ entry.timestamp | date:'shortTime' }}
-                            </div>
-                        </ng-template>
-                        <span class="text-muted" [ngbTooltip]="timestamp">{{ entry.timestamp | customDate:'relative' }}</span>
-                        @if (entry.actor) {
-                            <span class="ms-3 fst-italic">{{ entry.actor.username }}</span>
-                        } @else {
-                            <span class="ms-3 fst-italic">System</span>
-                        }
-                        <span class="badge bg-secondary ms-auto" [class.bg-primary]="entry.action === AuditLogAction.Create">{{ entry.action | titlecase }}</span>
+                    <div class="d-flex justify-content-center">
+                        <span class="fst-italic" i18n>No workflow runs found.</span>
                     </div>
-                    <ul class="mt-2">
-                        @for (change of entry.changes | keyvalue; track change.key) {
-                            @if (change.value["type"] === 'm2m') {
-                                <li>
-                                    <span class="fst-italic">{{ change.value["operation"] | titlecase }}</span>&nbsp;
-                                    <span>{{ change.key | titlecase }}</span>:&nbsp;
-                                    <code class="text-primary">{{ change.value["objects"].join(', ') }}</code>
-                                </li>
-                            }
-                            @else if (change.value["type"] === 'custom_field') {
-                                <li>
-                                    <span>{{ change.value["field"] }}</span>:&nbsp;
-                                    <code class="text-primary">{{ change.value["value"] }}</code>
-                                </li>
-                            }
-                            @else {
-                                <li>
-                                    <span>{{ change.key | titlecase }}</span>:&nbsp;
-                                    @if (change.key === 'content') {
-                                        <code class="text-primary">{{ change.value[1]?.substring(0,100) }}...</code>
-                                    } @else {
-                                        <code class="text-primary">{{ getPrettyName(change.key, change.value[1]) | async }}</code>
-                                    }
-                                </li>
-                            }
-                        }
-                    </ul>
                 </li>
+            } @else {
+                @for (run of workflowRuns; track run.id) {
+                    <li class="list-group-item">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <span class="fw-semibold">{{ run.workflow_name }}</span>
+                            <span class="badge text-bg-secondary">{{ run.trigger_type_display }}</span>
+                            <span
+                                class="badge"
+                                [class.text-bg-success]="run.status === 'success'"
+                                [class.text-bg-danger]="run.status === 'failed'"
+                                [class.text-bg-primary]="run.status === 'running'"
+                                [class.text-bg-secondary]="run.status !== 'success' && run.status !== 'failed' && run.status !== 'running'"
+                            >
+                                {{ run.status_display || run.status | titlecase }}
+                            </span>
+                            <span class="text-muted">{{ run.started_at || run.run_at | customDate:'relative' }}</span>
+                            @if (run.started_by) {
+                                <span class="fst-italic">{{ run.started_by.username }}</span>
+                            } @else {
+                                <span class="fst-italic" i18n>System</span>
+                            }
+                        </div>
+                        @if (run.message || run.error) {
+                            <div class="mt-2 small">
+                                @if (run.message) {
+                                    <div>{{ run.message }}</div>
+                                }
+                                @if (run.error) {
+                                    <div class="text-danger">{{ run.error }}</div>
+                                }
+                            </div>
+                        }
+                        @if (run.steps?.length) {
+                            <ul class="mt-2 mb-0">
+                                @for (step of run.steps; track step.id) {
+                                    <li class="mb-1">
+                                        <span class="badge me-2"
+                                            [class.text-bg-success]="step.status === 'success'"
+                                            [class.text-bg-danger]="step.status === 'failed'"
+                                            [class.text-bg-primary]="step.status === 'running'"
+                                            [class.text-bg-secondary]="step.status !== 'success' && step.status !== 'failed' && step.status !== 'running'"
+                                        >
+                                            {{ step.status | titlecase }}
+                                        </span>
+                                        <span i18n>Step</span> {{ step.order }}
+                                        @if (step.message) {
+                                            <span class="ms-2">{{ step.message }}</span>
+                                        }
+                                        @if (step.error) {
+                                            <div class="text-danger small">{{ step.error }}</div>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </li>
+                }
             }
-        }
-    </ul>
+        </ul>
+    </div>
+
+    <div>
+        <h6 i18n>Audit trail</h6>
+        <ul class="list-group">
+            @if (entries.length === 0) {
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-center">
+                        <span class="fst-italic" i18n>No entries found.</span>
+                    </div>
+                </li>
+            } @else {
+                @for (entry of entries; track entry.id) {
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <ng-template #timestamp>
+                                <div class="text-light">
+                                    {{ entry.timestamp | customDate:'longDate' }} {{ entry.timestamp | date:'shortTime' }}
+                                </div>
+                            </ng-template>
+                            <span class="text-muted" [ngbTooltip]="timestamp">{{ entry.timestamp | customDate:'relative' }}</span>
+                            @if (entry.actor) {
+                                <span class="ms-3 fst-italic">{{ entry.actor.username }}</span>
+                            } @else {
+                                <span class="ms-3 fst-italic">System</span>
+                            }
+                            <span class="badge bg-secondary ms-auto" [class.bg-primary]="entry.action === AuditLogAction.Create">{{ entry.action | titlecase }}</span>
+                        </div>
+                        <ul class="mt-2">
+                            @for (change of entry.changes | keyvalue; track change.key) {
+                                @if (change.value["type"] === 'm2m') {
+                                    <li>
+                                        <span class="fst-italic">{{ change.value["operation"] | titlecase }}</span>&nbsp;
+                                        <span>{{ change.key | titlecase }}</span>:&nbsp;
+                                        <code class="text-primary">{{ change.value["objects"].join(', ') }}</code>
+                                    </li>
+                                }
+                                @else if (change.value["type"] === 'custom_field') {
+                                    <li>
+                                        <span>{{ change.value["field"] }}</span>:&nbsp;
+                                        <code class="text-primary">{{ change.value["value"] }}</code>
+                                    </li>
+                                }
+                                @else {
+                                    <li>
+                                        <span>{{ change.key | titlecase }}</span>:&nbsp;
+                                        @if (change.key === 'content') {
+                                            <code class="text-primary">{{ change.value[1]?.substring(0,100) }}...</code>
+                                        } @else {
+                                            <code class="text-primary">{{ getPrettyName(change.key, change.value[1]) | async }}</code>
+                                        }
+                                    </li>
+                                }
+                            }
+                        </ul>
+                    </li>
+                }
+            }
+        </ul>
+    </div>
 }
