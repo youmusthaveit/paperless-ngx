@@ -285,11 +285,32 @@ class RemotePaperlessClient:
             raise RemoteImportError("Remote document detail is invalid.")
         return payload
 
-    def get_entity_detail(self, path: str, object_id: int) -> dict[str, Any]:
-        payload = self.get_json(f"{path}/{object_id}/")
+    def get_filtered_results(
+        self,
+        path: str,
+        *,
+        ids: set[int],
+    ) -> list[dict[str, Any]]:
+        if not ids:
+            return []
+
+        payload = self.get_json(
+            f"{path}/",
+            params={
+                "id__in": ",".join(str(object_id) for object_id in sorted(ids)),
+                "page_size": len(ids),
+            },
+        )
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
         if not isinstance(payload, dict):
-            raise RemoteImportError(f"Remote {path} detail is invalid.")
-        return payload
+            raise RemoteImportError(f"Remote {path} response is invalid.")
+
+        results = payload.get("results")
+        if not isinstance(results, list):
+            raise RemoteImportError(f"Remote {path} pagination response is invalid.")
+
+        return [item for item in results if isinstance(item, dict)]
 
     def download_document_original(self, document_id: int) -> tuple[str, bytes]:
         response = self._request(
@@ -383,21 +404,31 @@ class RemoteImportService:
         path: str,
         ids: set[int],
     ) -> dict[int, dict[str, Any]]:
-        entities: dict[int, dict[str, Any]] = {}
-        for object_id in sorted(ids):
-            try:
-                entity = client.get_entity_detail(path, object_id)
-            except RemoteImportError as exc:
-                logger.warning(
-                    "Remote import could not load %s %s: %s",
-                    path,
-                    object_id,
-                    exc,
-                )
-                continue
+        if not ids:
+            return {}
 
+        try:
+            payload = client.get_filtered_results(path, ids=ids)
+        except RemoteImportError as exc:
+            logger.warning(
+                "Remote import could not filter %s by ids, falling back to full list: %s",
+                path,
+                exc,
+            )
+            try:
+                payload = client.get_all_results(f"{path}/")
+            except RemoteImportError as fallback_exc:
+                logger.warning(
+                    "Remote import could not load %s list: %s",
+                    path,
+                    fallback_exc,
+                )
+                return {}
+
+        entities: dict[int, dict[str, Any]] = {}
+        for entity in payload:
             entity_id = coerce_remote_id(entity.get("id"))
-            if entity_id is None:
+            if entity_id is None or entity_id not in ids:
                 continue
             entities[entity_id] = entity
 

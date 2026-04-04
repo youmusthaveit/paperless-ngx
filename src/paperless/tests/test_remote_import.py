@@ -44,10 +44,21 @@ def test_extract_filename_from_content_disposition_uses_default_fallback() -> No
 
 
 class DummyRemoteClient:
-    def __init__(self, payload, entities=None, failing_paths=None) -> None:
+    def __init__(
+        self,
+        payload,
+        entities=None,
+        failing_paths=None,
+        filtered_supported_paths=None,
+    ) -> None:
         self.payload = payload
         self.entities = entities or {}
         self.failing_paths = set(failing_paths or [])
+        self.filtered_supported_paths = (
+            set(filtered_supported_paths)
+            if filtered_supported_paths is not None
+            else None
+        )
 
     def __enter__(self):
         return self
@@ -58,10 +69,29 @@ class DummyRemoteClient:
     def get_documents_page(self, *, query: str, page: int, page_size: int):
         return self.payload
 
-    def get_entity_detail(self, path: str, object_id: int):
+    def get_filtered_results(self, path: str, *, ids: set[int]):
         if path in self.failing_paths:
             raise RemoteImportError(f"{path} endpoint failed")
-        return self.entities[(path, object_id)]
+        if (
+            self.filtered_supported_paths is not None
+            and path not in self.filtered_supported_paths
+        ):
+            raise RemoteImportError(f"{path} filtering unsupported")
+        return [
+            entity
+            for (entity_path, entity_id), entity in self.entities.items()
+            if entity_path == path and entity_id in ids
+        ]
+
+    def get_all_results(self, path: str):
+        normalized_path = path.rstrip("/")
+        if normalized_path in self.failing_paths:
+            raise RemoteImportError(f"{normalized_path} endpoint failed")
+        return [
+            entity
+            for (entity_path, _), entity in self.entities.items()
+            if entity_path == normalized_path
+        ]
 
 
 def test_browse_documents_fetches_only_referenced_entities() -> None:
@@ -150,3 +180,49 @@ def test_browse_documents_tolerates_reference_endpoint_failures() -> None:
     assert result["results"][0]["id"] == 7
     assert result["results"][0]["correspondent"] is None
     assert result["results"][0]["tags"] == []
+
+
+def test_browse_documents_falls_back_to_full_lists_for_older_api() -> None:
+    payload = {
+        "count": 1,
+        "next": None,
+        "previous": None,
+        "all": [7],
+        "results": [
+            {
+                "id": 7,
+                "title": "Invoice 7",
+                "created": "2026-03-29",
+                "original_file_name": "invoice-7.pdf",
+                "archive_serial_number": None,
+                "correspondent": 3,
+                "document_type": 2,
+                "storage_path": 4,
+                "tags": [9],
+                "custom_fields": [],
+            },
+        ],
+    }
+    entities = {
+        ("correspondents", 3): {"id": 3, "name": "ACME"},
+        ("document_types", 2): {"id": 2, "name": "Invoices"},
+        ("storage_paths", 4): {"id": 4, "name": "Inbox"},
+        ("tags", 9): {"id": 9, "name": "mail"},
+    }
+    client = DummyRemoteClient(
+        payload,
+        entities,
+        filtered_supported_paths=set(),
+    )
+    service = RemoteImportService(
+        base_url="https://remote.example.com",
+        api_token="secret-token",
+    )
+
+    with mock.patch.object(service, "_client", return_value=client):
+        result = service.browse_documents(query="", page=1, page_size=25)
+
+    assert result["results"][0]["correspondent"] == {"id": 3, "name": "ACME"}
+    assert result["results"][0]["document_type"] == {"id": 2, "name": "Invoices"}
+    assert result["results"][0]["storage_path"] == {"id": 4, "name": "Inbox"}
+    assert result["results"][0]["tags"] == [{"id": 9, "name": "mail"}]

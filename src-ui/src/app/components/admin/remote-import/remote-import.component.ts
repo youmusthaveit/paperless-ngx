@@ -81,6 +81,8 @@ export class RemoteImportComponent
   })
 
   ngOnInit(): void {
+    this.initializeDocumentRefresh()
+
     if (this.configIdOverride !== null) {
       this.configId = this.configIdOverride
       this.form.patchValue({
@@ -108,30 +110,6 @@ export class RemoteImportComponent
           this.loading = false
           this.toastService.showError(
             $localize`Error retrieving configuration`,
-            error
-          )
-        },
-      })
-
-    this.refreshDocuments$
-      .pipe(
-        takeUntil(this.unsubscribeNotifier),
-        switchMap(() =>
-          this.remoteImportService.browseDocuments(
-            this.configId!,
-            this.buildBrowsePayload()
-          )
-        )
-      )
-      .subscribe({
-        next: (page) => {
-          this.documentsPage = page
-          this.loadingDocuments = false
-        },
-        error: (error) => {
-          this.loadingDocuments = false
-          this.toastService.showError(
-            $localize`Error loading remote documents`,
             error
           )
         },
@@ -351,5 +329,31 @@ export class RemoteImportComponent
 
   trackByDocumentId(_: number, document: RemoteImportDocumentPreview): number {
     return document.id
+  }
+
+  private initializeDocumentRefresh(): void {
+    this.refreshDocuments$
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        switchMap(() =>
+          this.remoteImportService.browseDocuments(
+            this.configId!,
+            this.buildBrowsePayload()
+          )
+        )
+      )
+      .subscribe({
+        next: (page) => {
+          this.documentsPage = page
+          this.loadingDocuments = false
+        },
+        error: (error) => {
+          this.loadingDocuments = false
+          this.toastService.showError(
+            $localize`Error loading remote documents`,
+            error
+          )
+        },
+      })
   }
 }
