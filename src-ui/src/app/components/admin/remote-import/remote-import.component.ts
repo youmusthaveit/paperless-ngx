@@ -1,5 +1,13 @@
 import { NgClass } from '@angular/common'
-import { Component, inject, Input, OnDestroy, OnInit } from '@angular/core'
+import {
+  Component,
+  EventEmitter,
+  inject,
+  Input,
+  OnDestroy,
+  OnInit,
+  Output,
+} from '@angular/core'
 import {
   FormControl,
   FormGroup,
@@ -19,6 +27,7 @@ import {
 import { ConfigService } from 'src/app/services/config.service'
 import {
   RemoteImportBrowsePayload,
+  RemoteImportConnectionPayload,
   RemoteImportService,
   RemoteImportStartPayload,
 } from 'src/app/services/remote-import.service'
@@ -54,6 +63,8 @@ export class RemoteImportComponent
   @Input() configIdOverride: number | null = null
   @Input() initialBaseUrl: string | null = null
   @Input() initialApiToken: string | null = null
+  @Output() connectionChanged =
+    new EventEmitter<RemoteImportConnectionPayload>()
 
   configId: number | null = null
   inspection: RemoteImportInspection | null = null
@@ -82,6 +93,7 @@ export class RemoteImportComponent
 
   ngOnInit(): void {
     this.initializeDocumentRefresh()
+    this.initializeConnectionSync()
 
     if (this.configIdOverride !== null) {
       this.configId = this.configIdOverride
@@ -355,5 +367,25 @@ export class RemoteImportComponent
           )
         },
       })
+  }
+
+  private initializeConnectionSync(): void {
+    if (!this.embedded) {
+      return
+    }
+
+    this.form.controls.base_url.valueChanges
+      .pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe(() => this.emitConnectionChanged())
+    this.form.controls.api_token.valueChanges
+      .pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe(() => this.emitConnectionChanged())
+  }
+
+  private emitConnectionChanged(): void {
+    this.connectionChanged.emit({
+      base_url: this.form.value.base_url ?? '',
+      api_token: this.form.value.api_token ?? '',
+    })
   }
 }

@@ -126,6 +126,30 @@ describe('ConfigComponent', () => {
     )
   })
 
+  it('should update remote import connection values in config form', () => {
+    component.onRemoteImportConnectionChanged({
+      base_url: 'https://remote.example.com',
+      api_token: 'secret-token',
+    })
+
+    expect(component.configForm.get('remote_import_base_url')?.value).toEqual(
+      'https://remote.example.com'
+    )
+    expect(component.configForm.get('remote_import_api_token')?.value).toEqual(
+      'secret-token'
+    )
+
+    component.onRemoteImportConnectionChanged({
+      base_url: '',
+      api_token: '',
+    })
+
+    expect(component.configForm.get('remote_import_base_url')?.value).toBeNull()
+    expect(
+      component.configForm.get('remote_import_api_token')?.value
+    ).toBeNull()
+  })
+
   it('should support JSON validation for e.g. user_args', () => {
     component.configForm.patchValue({ user_args: '{ foo bar }' })
     expect(component.errors['user_args']).toEqual('Invalid JSON')

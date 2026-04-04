@@ -407,7 +407,8 @@
                                 [embedded]="true"
                                 [configIdOverride]="configForm.get('id')?.value"
                                 [initialBaseUrl]="configForm.get('remote_import_base_url')?.value"
-                                [initialApiToken]="configForm.get('remote_import_api_token')?.value">
+                                [initialApiToken]="configForm.get('remote_import_api_token')?.value"
+                                (connectionChanged)="onRemoteImportConnectionChanged($event)">
                             </pngx-remote-import>
                         }
                     </div>

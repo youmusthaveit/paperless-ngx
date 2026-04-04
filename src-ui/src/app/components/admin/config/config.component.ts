@@ -46,6 +46,7 @@ import {
 import { S3Storage, S3StorageExport } from 'src/app/data/s3-storage'
 import { ConfigService } from 'src/app/services/config.service'
 import { PermissionsService } from 'src/app/services/permissions.service'
+import { RemoteImportConnectionPayload } from 'src/app/services/remote-import.service'
 import { SettingsService } from 'src/app/services/settings.service'
 import { TasksService } from 'src/app/services/tasks.service'
 import { ToastService } from 'src/app/services/toast.service'
@@ -294,6 +295,15 @@ export class ConfigComponent
   public discardChanges() {
     this.configForm.reset(this.initialConfig)
     this.setBackupJobs(this.initialConfig?.documents_backup_schedule_jobs ?? [])
+  }
+
+  public onRemoteImportConnectionChanged(
+    connection: RemoteImportConnectionPayload
+  ) {
+    this.configForm.patchValue({
+      remote_import_base_url: connection.base_url || null,
+      remote_import_api_token: connection.api_token || null,
+    })
   }
 
   public uploadFile(file: File, key: string) {
