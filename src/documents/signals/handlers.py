@@ -32,6 +32,7 @@ from documents.caching import clear_document_caches
 from documents.file_handling import delete_empty_directories
 from documents.file_handling import generate_filename
 from documents.file_handling import generate_unique_filename
+from documents.models import ApprovalRequest
 from documents.models import CustomField
 from documents.models import CustomFieldInstance
 from documents.models import Document
@@ -55,6 +56,7 @@ from documents.storage import document_move
 from documents.storage import document_storage_is_local
 from documents.templating.utils import convert_format_str_to_template_format
 from documents.workflows.actions import build_workflow_action_context
+from documents.workflows.actions import execute_approval_action
 from documents.workflows.actions import execute_email_action
 from documents.workflows.actions import execute_move_to_trash_action
 from documents.workflows.actions import execute_password_removal_action
@@ -95,6 +97,20 @@ def _finalize_workflow_run(workflow_run: WorkflowRun) -> None:
         workflow_run.message = failed_step.message or "Workflow failed"
         workflow_run.error = failed_step.error
     elif any(
+        step.status == WorkflowRunStep.WorkflowRunStepStatus.WAITING_APPROVAL
+        for step in steps
+    ):
+        waiting_step = next(
+            step
+            for step in steps
+            if step.status == WorkflowRunStep.WorkflowRunStepStatus.WAITING_APPROVAL
+        )
+        workflow_run.status = WorkflowRun.WorkflowRunStatus.WAITING_APPROVAL
+        workflow_run.finished_at = None
+        workflow_run.current_step_order = waiting_step.order
+        workflow_run.message = waiting_step.message or "Waiting for approval"
+        workflow_run.error = ""
+    elif any(
         step.status in [WorkflowRunStep.WorkflowRunStepStatus.RUNNING] for step in steps
     ):
         running_step = next(
@@ -124,6 +140,316 @@ def _finalize_workflow_run(workflow_run: WorkflowRun) -> None:
             "error",
         ],
     )
+
+
+def _mark_workflow_step_failure(
+    workflow_run: WorkflowRun,
+    step: WorkflowRunStep,
+    *,
+    message: str,
+    error: str,
+) -> None:
+    step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
+    step.finished_at = timezone.now()
+    step.error = error
+    step.message = message
+    step.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "error",
+            "message",
+        ],
+    )
+    _finalize_workflow_run(workflow_run)
+
+
+def _save_document_workflow_mutations(
+    document: Document,
+    doc_tag_ids: list[int],
+) -> None:
+    document.title = document.title[:128]
+    document.save(
+        update_fields=[
+            "title",
+            "correspondent",
+            "document_type",
+            "storage_path",
+            "owner",
+            "modified",
+        ],
+    )
+    document.tags.set(doc_tag_ids)
+
+
+def _execute_workflow_actions(
+    workflow_run: WorkflowRun,
+    workflow: Workflow,
+    trigger_type: WorkflowTrigger.WorkflowTriggerType,
+    document: Document | ConsumableDocument,
+    *,
+    logging_group,
+    use_overrides: bool,
+    overrides: DocumentMetadataOverrides | None,
+    original_file: Path | None,
+    started_by: User | None,
+    doc_tag_ids: list[int] | None = None,
+    start_after_action_id: int | None = None,
+) -> bool:
+    resume_started = start_after_action_id is None
+    for action in workflow.actions.order_by("order", "pk"):
+        if not resume_started:
+            if action.id == start_after_action_id:
+                resume_started = True
+            continue
+
+        if action.id == start_after_action_id:
+            continue
+
+        message = f"Applying {action} from {workflow}"
+        if not use_overrides:
+            logger.info(message, extra={"group": logging_group})
+
+        step = WorkflowRunStep.objects.create(
+            workflow_run=workflow_run,
+            action=action,
+            order=action.order,
+            status=WorkflowRunStep.WorkflowRunStepStatus.RUNNING,
+            started_at=timezone.now(),
+            message=message,
+        )
+        workflow_run.current_step_order = action.order
+        workflow_run.message = message
+        workflow_run.save(update_fields=["current_step_order", "message"])
+
+        if action.type == WorkflowAction.WorkflowActionType.ASSIGNMENT:
+            try:
+                if use_overrides and overrides:
+                    apply_assignment_to_overrides(action, overrides)
+                else:
+                    apply_assignment_to_document(
+                        action,
+                        document,
+                        doc_tag_ids,
+                        logging_group,
+                    )
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+                step.finished_at = timezone.now()
+                step.message = "Assignment applied"
+                step.save(update_fields=["status", "finished_at", "message"])
+            except Exception as exc:
+                _mark_workflow_step_failure(
+                    workflow_run,
+                    step,
+                    message="Assignment failed",
+                    error=str(exc),
+                )
+                raise
+        elif action.type == WorkflowAction.WorkflowActionType.REMOVAL:
+            try:
+                if use_overrides and overrides:
+                    apply_removal_to_overrides(action, overrides)
+                else:
+                    apply_removal_to_document(action, document, doc_tag_ids)
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+                step.finished_at = timezone.now()
+                step.message = "Removal applied"
+                step.save(update_fields=["status", "finished_at", "message"])
+            except Exception as exc:
+                _mark_workflow_step_failure(
+                    workflow_run,
+                    step,
+                    message="Removal failed",
+                    error=str(exc),
+                )
+                raise
+        elif action.type == WorkflowAction.WorkflowActionType.EMAIL:
+            context = build_workflow_action_context(document, overrides)
+            result = execute_email_action(
+                action,
+                document,
+                context,
+                logging_group,
+                original_file,
+                trigger_type,
+            )
+            step.status = (
+                WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+                if result.status == "success"
+                else WorkflowRunStep.WorkflowRunStepStatus.FAILED
+            )
+            step.finished_at = timezone.now()
+            step.message = result.message or "Email action completed"
+            step.error = result.error
+            step.response_payload = result.response_payload
+            step.save(
+                update_fields=[
+                    "status",
+                    "finished_at",
+                    "message",
+                    "error",
+                    "response_payload",
+                ],
+            )
+        elif action.type == WorkflowAction.WorkflowActionType.WEBHOOK:
+            context = build_workflow_action_context(document, overrides)
+            result = execute_webhook_action(
+                action,
+                document,
+                context,
+                logging_group,
+                original_file,
+                run_step_id=step.pk,
+            )
+            step.message = result.message or "Webhook queued"
+            step.error = result.error
+            step.request_payload = result.request_payload
+            if result.status == "running":
+                step.save(
+                    update_fields=[
+                        "message",
+                        "error",
+                        "request_payload",
+                    ],
+                )
+            else:
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
+                step.finished_at = timezone.now()
+                step.save(
+                    update_fields=[
+                        "status",
+                        "finished_at",
+                        "message",
+                        "error",
+                        "request_payload",
+                    ],
+                )
+        elif action.type == WorkflowAction.WorkflowActionType.PASSWORD_REMOVAL:
+            try:
+                execute_password_removal_action(
+                    action,
+                    document,
+                    logging_group,
+                )
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+                step.finished_at = timezone.now()
+                step.message = "Password removal action completed"
+                step.save(update_fields=["status", "finished_at", "message"])
+            except Exception as exc:
+                _mark_workflow_step_failure(
+                    workflow_run,
+                    step,
+                    message="Password removal failed",
+                    error=str(exc),
+                )
+                raise
+        elif action.type == WorkflowAction.WorkflowActionType.MOVE_TO_TRASH:
+            try:
+                execute_move_to_trash_action(
+                    action,
+                    document,
+                    logging_group,
+                )
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+                step.finished_at = timezone.now()
+                step.message = "Document moved to trash"
+                step.save(update_fields=["status", "finished_at", "message"])
+            except Exception as exc:
+                _mark_workflow_step_failure(
+                    workflow_run,
+                    step,
+                    message="Move to trash failed",
+                    error=str(exc),
+                )
+                raise
+        elif action.type == WorkflowAction.WorkflowActionType.APPROVAL:
+            result = execute_approval_action(
+                action,
+                document,
+                workflow_run,
+                step,
+                started_by,
+                logging_group,
+            )
+            if result.status == "waiting_approval":
+                step.status = WorkflowRunStep.WorkflowRunStepStatus.WAITING_APPROVAL
+                step.message = result.message
+                step.request_payload = result.request_payload
+                step.save(
+                    update_fields=[
+                        "status",
+                        "message",
+                        "request_payload",
+                    ],
+                )
+                workflow_run.status = WorkflowRun.WorkflowRunStatus.WAITING_APPROVAL
+                workflow_run.message = result.message
+                workflow_run.save(update_fields=["status", "message"])
+                if not use_overrides and isinstance(document, Document):
+                    _save_document_workflow_mutations(document, doc_tag_ids)
+                return True
+
+            _mark_workflow_step_failure(
+                workflow_run,
+                step,
+                message="Approval request failed",
+                error=result.error or "Approval request could not be created",
+            )
+            raise ValueError(result.error or "Approval request could not be created")
+
+    if not use_overrides and isinstance(document, Document):
+        _save_document_workflow_mutations(document, doc_tag_ids)
+    return False
+
+
+def continue_workflow_run(
+    workflow_run: WorkflowRun,
+    *,
+    decided_by: User | None = None,
+    logging_group=None,
+) -> None:
+    if workflow_run.document_id is None:
+        return
+
+    workflow = get_workflows_for_trigger(
+        workflow_run.type,
+        workflow_run.workflow,
+    ).first()
+    if workflow is None:
+        return
+
+    workflow_run.document.refresh_from_db()
+    doc_tag_ids = list(workflow_run.document.tags.values_list("pk", flat=True))
+    approval_step = (
+        workflow_run.steps.filter(
+            status=WorkflowRunStep.WorkflowRunStepStatus.SUCCESS,
+            approval_request__status=ApprovalRequest.ApprovalStatus.APPROVED,
+        )
+        .select_related("action")
+        .order_by("-finished_at", "-pk")
+        .first()
+    )
+    workflow_run.status = WorkflowRun.WorkflowRunStatus.RUNNING
+    workflow_run.message = "Workflow resumed"
+    workflow_run.error = ""
+    workflow_run.finished_at = None
+    workflow_run.save(
+        update_fields=["status", "message", "error", "finished_at"],
+    )
+    _execute_workflow_actions(
+        workflow_run,
+        workflow,
+        workflow_run.type,
+        workflow_run.document,
+        logging_group=logging_group,
+        use_overrides=False,
+        overrides=None,
+        original_file=None,
+        started_by=decided_by,
+        doc_tag_ids=doc_tag_ids,
+        start_after_action_id=approval_step.action_id if approval_step else None,
+    )
+    _finalize_workflow_run(workflow_run)
 
 
 def add_inbox_tags(sender, document: Document, logging_group=None, **kwargs):
@@ -1009,233 +1335,24 @@ def run_workflows(
                     started_by=started_by,
                     message="Workflow started",
                 )
-                action: WorkflowAction
-                for action in workflow.actions.order_by("order", "pk"):
-                    message = f"Applying {action} from {workflow}"
-                    if not use_overrides:
-                        logger.info(message, extra={"group": logging_group})
-                    else:
-                        messages.append(message)
+                if use_overrides:
+                    messages.append(f"Running {workflow}")
 
-                    step = WorkflowRunStep.objects.create(
-                        workflow_run=workflow_run,
-                        action=action,
-                        order=action.order,
-                        status=WorkflowRunStep.WorkflowRunStepStatus.RUNNING,
-                        started_at=timezone.now(),
-                        message=message,
-                    )
-                    workflow_run.current_step_order = action.order
-                    workflow_run.message = message
-                    workflow_run.save(
-                        update_fields=["current_step_order", "message"],
-                    )
+                workflow_paused = _execute_workflow_actions(
+                    workflow_run,
+                    workflow,
+                    trigger_type,
+                    document,
+                    logging_group=logging_group,
+                    use_overrides=use_overrides,
+                    overrides=overrides,
+                    original_file=original_file,
+                    started_by=started_by,
+                    doc_tag_ids=doc_tag_ids if not use_overrides else None,
+                )
 
-                    if action.type == WorkflowAction.WorkflowActionType.ASSIGNMENT:
-                        try:
-                            if use_overrides and overrides:
-                                apply_assignment_to_overrides(action, overrides)
-                            else:
-                                apply_assignment_to_document(
-                                    action,
-                                    document,
-                                    doc_tag_ids,
-                                    logging_group,
-                                )
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
-                            step.finished_at = timezone.now()
-                            step.message = "Assignment applied"
-                            step.save(
-                                update_fields=["status", "finished_at", "message"],
-                            )
-                        except Exception as exc:
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                            step.finished_at = timezone.now()
-                            step.error = str(exc)
-                            step.message = "Assignment failed"
-                            step.save(
-                                update_fields=[
-                                    "status",
-                                    "finished_at",
-                                    "error",
-                                    "message",
-                                ],
-                            )
-                            _finalize_workflow_run(workflow_run)
-                            raise
-                    elif action.type == WorkflowAction.WorkflowActionType.REMOVAL:
-                        try:
-                            if use_overrides and overrides:
-                                apply_removal_to_overrides(action, overrides)
-                            else:
-                                apply_removal_to_document(action, document, doc_tag_ids)
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
-                            step.finished_at = timezone.now()
-                            step.message = "Removal applied"
-                            step.save(
-                                update_fields=["status", "finished_at", "message"],
-                            )
-                        except Exception as exc:
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                            step.finished_at = timezone.now()
-                            step.error = str(exc)
-                            step.message = "Removal failed"
-                            step.save(
-                                update_fields=[
-                                    "status",
-                                    "finished_at",
-                                    "error",
-                                    "message",
-                                ],
-                            )
-                            _finalize_workflow_run(workflow_run)
-                            raise
-                    elif action.type == WorkflowAction.WorkflowActionType.EMAIL:
-                        context = build_workflow_action_context(document, overrides)
-                        result = execute_email_action(
-                            action,
-                            document,
-                            context,
-                            logging_group,
-                            original_file,
-                            trigger_type,
-                        )
-                        step.status = (
-                            WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
-                            if result.status == "success"
-                            else WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                        )
-                        step.finished_at = timezone.now()
-                        step.message = result.message or "Email action completed"
-                        step.error = result.error
-                        step.response_payload = result.response_payload
-                        step.save(
-                            update_fields=[
-                                "status",
-                                "finished_at",
-                                "message",
-                                "error",
-                                "response_payload",
-                            ],
-                        )
-                    elif action.type == WorkflowAction.WorkflowActionType.WEBHOOK:
-                        context = build_workflow_action_context(document, overrides)
-                        result = execute_webhook_action(
-                            action,
-                            document,
-                            context,
-                            logging_group,
-                            original_file,
-                            run_step_id=step.pk,
-                        )
-                        step.message = result.message or "Webhook queued"
-                        step.error = result.error
-                        step.request_payload = result.request_payload
-                        if result.status == "running":
-                            step.save(
-                                update_fields=[
-                                    "message",
-                                    "error",
-                                    "request_payload",
-                                ],
-                            )
-                        else:
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                            step.finished_at = timezone.now()
-                            step.save(
-                                update_fields=[
-                                    "status",
-                                    "finished_at",
-                                    "message",
-                                    "error",
-                                    "request_payload",
-                                ],
-                            )
-                    elif (
-                        action.type
-                        == WorkflowAction.WorkflowActionType.PASSWORD_REMOVAL
-                    ):
-                        try:
-                            execute_password_removal_action(
-                                action,
-                                document,
-                                logging_group,
-                            )
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
-                            step.finished_at = timezone.now()
-                            step.message = "Password removal action completed"
-                            step.save(
-                                update_fields=["status", "finished_at", "message"],
-                            )
-                        except Exception as exc:
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                            step.finished_at = timezone.now()
-                            step.error = str(exc)
-                            step.message = "Password removal failed"
-                            step.save(
-                                update_fields=[
-                                    "status",
-                                    "finished_at",
-                                    "error",
-                                    "message",
-                                ],
-                            )
-                            _finalize_workflow_run(workflow_run)
-                            raise
-                    elif action.type == WorkflowAction.WorkflowActionType.MOVE_TO_TRASH:
-                        try:
-                            execute_move_to_trash_action(
-                                action,
-                                document,
-                                logging_group,
-                            )
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
-                            step.finished_at = timezone.now()
-                            step.message = "Document moved to trash"
-                            step.save(
-                                update_fields=["status", "finished_at", "message"],
-                            )
-                        except Exception as exc:
-                            step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
-                            step.finished_at = timezone.now()
-                            step.error = str(exc)
-                            step.message = "Move to trash failed"
-                            step.save(
-                                update_fields=[
-                                    "status",
-                                    "finished_at",
-                                    "error",
-                                    "message",
-                                ],
-                            )
-                            _finalize_workflow_run(workflow_run)
-                            raise
-
-                if not use_overrides:
-                    # limit title to 128 characters
-                    document.title = document.title[:128]
-                    # Save only the fields that workflow actions can set directly.
-                    # Deliberately excludes filename and archive_filename — those are
-                    # managed exclusively by update_filename_and_move_files via the
-                    # post_save signal. Writing stale in-memory values here would revert
-                    # a concurrent update_filename_and_move_files DB write, leaving the
-                    # DB pointing at the old path while the file is already at the new
-                    # one (see: https://github.com/paperless-ngx/paperless-ngx/issues/12386).
-                    # modified has auto_now=True but is not auto-added when update_fields
-                    # is specified, so it must be listed explicitly.
-                    document.save(
-                        update_fields=[
-                            "title",
-                            "correspondent",
-                            "document_type",
-                            "storage_path",
-                            "owner",
-                            "modified",
-                        ],
-                    )
-                    document.tags.set(doc_tag_ids)
-
-                _finalize_workflow_run(workflow_run)
+                if not workflow_paused:
+                    _finalize_workflow_run(workflow_run)
 
         if use_overrides:
             return overrides, "\n".join(messages)

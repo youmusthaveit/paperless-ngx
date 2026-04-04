@@ -58,6 +58,7 @@ if settings.AUDIT_LOG_ENABLED:
 from documents import bulk_edit
 from documents.data_models import DocumentSource
 from documents.filters import CustomFieldQueryParser
+from documents.models import ApprovalRequest
 from documents.models import Correspondent
 from documents.models import CustomField
 from documents.models import CustomFieldInstance
@@ -75,6 +76,7 @@ from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
+from documents.models import WorkflowActionApproval
 from documents.models import WorkflowActionEmail
 from documents.models import WorkflowActionWebhook
 from documents.models import WorkflowRun
@@ -3150,6 +3152,18 @@ class WorkflowActionWebhookSerializer(serializers.ModelSerializer):
         ]
 
 
+class WorkflowActionApprovalSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(allow_null=True, required=False)
+
+    class Meta:
+        model = WorkflowActionApproval
+        fields = [
+            "id",
+            "user",
+            "message",
+        ]
+
+
 class WorkflowActionSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False, allow_null=True)
     assign_correspondent = CorrespondentField(allow_null=True, required=False)
@@ -3158,6 +3172,7 @@ class WorkflowActionSerializer(serializers.ModelSerializer):
     assign_storage_path = StoragePathField(allow_null=True, required=False)
     email = WorkflowActionEmailSerializer(allow_null=True, required=False)
     webhook = WorkflowActionWebhookSerializer(allow_null=True, required=False)
+    approval = WorkflowActionApprovalSerializer(allow_null=True, required=False)
 
     class Meta:
         model = WorkflowAction
@@ -3195,6 +3210,7 @@ class WorkflowActionSerializer(serializers.ModelSerializer):
             "remove_change_groups",
             "email",
             "webhook",
+            "approval",
             "passwords",
         ]
 
@@ -3250,6 +3266,15 @@ class WorkflowActionSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError(
                 "Webhook data is required for webhook actions",
+            )
+
+        if (
+            "type" in attrs
+            and attrs["type"] == WorkflowAction.WorkflowActionType.APPROVAL
+            and "approval" not in attrs
+        ):
+            raise serializers.ValidationError(
+                "Approval data is required for approval actions",
             )
 
         if (
@@ -3387,6 +3412,7 @@ class WorkflowSerializer(serializers.ModelSerializer):
 
                 email_data = action.pop("email", None)
                 webhook_data = action.pop("webhook", None)
+                approval_data = action.pop("approval", None)
 
                 action_instance, _ = WorkflowAction.objects.update_or_create(
                     id=action.get("id"),
@@ -3411,6 +3437,16 @@ class WorkflowSerializer(serializers.ModelSerializer):
                         defaults=serializer.validated_data,
                     )
                     action_instance.webhook = webhook
+                    action_instance.save()
+
+                if approval_data is not None:
+                    serializer = WorkflowActionApprovalSerializer(data=approval_data)
+                    serializer.is_valid(raise_exception=True)
+                    approval, _ = WorkflowActionApproval.objects.update_or_create(
+                        id=approval_data.get("id"),
+                        defaults=serializer.validated_data,
+                    )
+                    action_instance.approval = approval
                     action_instance.save()
 
                 if assign_tags is not None:
@@ -3557,6 +3593,48 @@ class WorkflowRunHistorySerializer(serializers.ModelSerializer):
             "id": obj.started_by.id,
             "username": obj.started_by.username,
         }
+
+
+class ApprovalRequestDecisionSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class ApprovalRequestSerializer(serializers.ModelSerializer):
+    assigned_user = serializers.SerializerMethodField()
+    requested_by = serializers.SerializerMethodField()
+    decided_by = serializers.SerializerMethodField()
+    workflow_name = serializers.CharField(source="workflow_run.workflow.name")
+
+    class Meta:
+        model = ApprovalRequest
+        fields = [
+            "id",
+            "status",
+            "message",
+            "created_at",
+            "decided_at",
+            "assigned_user",
+            "requested_by",
+            "decided_by",
+            "workflow_name",
+            "workflow_run",
+            "workflow_run_step",
+        ]
+
+    @staticmethod
+    def _serialize_user(user: User | None) -> dict[str, Any] | None:
+        if user is None:
+            return None
+        return {"id": user.id, "username": user.username}
+
+    def get_assigned_user(self, obj: ApprovalRequest) -> dict[str, Any] | None:
+        return self._serialize_user(obj.assigned_user)
+
+    def get_requested_by(self, obj: ApprovalRequest) -> dict[str, Any] | None:
+        return self._serialize_user(obj.requested_by)
+
+    def get_decided_by(self, obj: ApprovalRequest) -> dict[str, Any] | None:
+        return self._serialize_user(obj.decided_by)
 
 
 class TrashSerializer(SerializerWithPerms):

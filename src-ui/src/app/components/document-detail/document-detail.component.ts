@@ -60,7 +60,7 @@ import { StoragePath } from 'src/app/data/storage-path'
 import { Tag } from 'src/app/data/tag'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import { User } from 'src/app/data/user'
-import { ManualWorkflowSummary } from 'src/app/data/workflow'
+import { ApprovalRequest, ManualWorkflowSummary } from 'src/app/data/workflow'
 import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
 import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
 import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
@@ -303,6 +303,8 @@ export class DocumentDetailComponent
   public useFormattedFilename: boolean = false
   public manualWorkflows: ManualWorkflowSummary[] = []
   public manualWorkflowRunningId: number | null = null
+  public approvalRequests: ApprovalRequest[] = []
+  public approvalActionId: number | null = null
 
   public readonly CustomFieldDataType = CustomFieldDataType
 
@@ -898,6 +900,7 @@ export class DocumentDetailComponent
   updateComponent(doc: Document) {
     this.document = doc
     this.loadManualWorkflows()
+    this.loadApprovalRequests()
     // Default selected version is the newest version
     const versions = doc.versions ?? []
     this.selectedVersionId = versions.length
@@ -1147,6 +1150,91 @@ export class DocumentDetailComponent
         error: (error) => {
           this.manualWorkflows = []
           this.toastService.showError($localize`Error loading workflows`, error)
+        },
+      })
+  }
+
+  private loadApprovalRequests(): void {
+    if (!this.document?.id) {
+      this.approvalRequests = []
+      return
+    }
+
+    this.documentsService
+      .getApprovalRequests(this.document.id)
+      .pipe(
+        first(),
+        takeUntil(this.unsubscribeNotifier),
+        takeUntil(this.docChangeNotifier)
+      )
+      .subscribe({
+        next: (requests) => {
+          this.approvalRequests = requests
+        },
+        error: () => {
+          this.approvalRequests = []
+        },
+      })
+  }
+
+  get pendingApprovalRequests(): ApprovalRequest[] {
+    return this.approvalRequests.filter(
+      (request) => request.status === 'pending'
+    )
+  }
+
+  canDecideApproval(request: ApprovalRequest): boolean {
+    const currentUserId = this.settings.currentUser?.id
+    return (
+      request.status === 'pending' &&
+      !!currentUserId &&
+      request.assigned_user?.id === currentUserId
+    )
+  }
+
+  approveRequest(request: ApprovalRequest): void {
+    if (!this.document?.id || this.approvalActionId !== null) {
+      return
+    }
+
+    this.approvalActionId = request.id
+    this.documentsService
+      .approveRequest(this.document.id, request.id)
+      .pipe(first(), takeUntil(this.unsubscribeNotifier))
+      .subscribe({
+        next: () => {
+          this.toastService.showInfo($localize`Approval granted`)
+          this.approvalActionId = null
+          this.reloadRemoteVersion()
+        },
+        error: (error) => {
+          this.approvalActionId = null
+          this.toastService.showError($localize`Error granting approval`, error)
+        },
+      })
+  }
+
+  rejectRequest(request: ApprovalRequest): void {
+    if (!this.document?.id || this.approvalActionId !== null) {
+      return
+    }
+
+    this.approvalActionId = request.id
+    this.documentsService
+      .rejectRequest(this.document.id, request.id)
+      .pipe(first(), takeUntil(this.unsubscribeNotifier))
+      .subscribe({
+        next: () => {
+          this.toastService.showInfo($localize`Approval rejected`)
+          this.approvalActionId = null
+          this.reloadRemoteVersion()
+        },
+        error: (error) => {
+          this.approvalActionId = null
+          this.toastService.showError(
+            $localize`Error rejecting approval`,
+            error
+          )
         },
       })
   }

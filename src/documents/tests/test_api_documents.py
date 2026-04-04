@@ -32,6 +32,7 @@ from documents.caching import CLASSIFIER_HASH_KEY
 from documents.caching import CLASSIFIER_MODIFIED_KEY
 from documents.caching import CLASSIFIER_VERSION_KEY
 from documents.data_models import DocumentSource
+from documents.models import ApprovalRequest
 from documents.models import Correspondent
 from documents.models import CustomField
 from documents.models import CustomFieldInstance
@@ -46,7 +47,9 @@ from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
+from documents.models import WorkflowActionApproval
 from documents.models import WorkflowRun
+from documents.models import WorkflowRunStep
 from documents.models import WorkflowTrigger
 from documents.signals.handlers import run_workflows
 from documents.tests.utils import DirectoriesMixin
@@ -2281,6 +2284,130 @@ class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
         self.assertEqual(response.data[0]["started_by"]["id"], self.user.id)
         self.assertEqual(len(response.data[0]["steps"]), 1)
         self.assertEqual(response.data[0]["steps"][0]["status"], "success")
+
+    def test_run_manual_workflow_with_approval(self) -> None:
+        approver = User.objects.create_superuser(username="approver")
+        tag = Tag.objects.create(name="approved-tag")
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="needs approval",
+            checksum="manual-workflow-approval",
+            mime_type="application/pdf",
+        )
+
+        trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="needs approval",
+        )
+        approval_action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.APPROVAL,
+            approval=WorkflowActionApproval.objects.create(
+                user=approver,
+                message="Please approve this document.",
+            ),
+        )
+
+        assignment_action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.ASSIGNMENT,
+        )
+        assignment_action.assign_tags.add(tag)
+
+        workflow = Workflow.objects.create(
+            name="Approval Workflow",
+            order=1,
+        )
+        workflow.triggers.add(trigger)
+        workflow.actions.add(approval_action, assignment_action)
+
+        response = self.client.post(
+            f"/api/documents/{doc.pk}/run-workflow/",
+            {"workflow_id": workflow.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        workflow_run = WorkflowRun.objects.get(workflow=workflow, document=doc)
+        self.assertEqual(
+            workflow_run.status,
+            WorkflowRun.WorkflowRunStatus.WAITING_APPROVAL,
+        )
+        approval = ApprovalRequest.objects.get(workflow_run=workflow_run)
+        self.assertEqual(approval.status, ApprovalRequest.ApprovalStatus.PENDING)
+        self.assertEqual(approval.assigned_user, approver)
+        self.assertEqual(
+            approval.workflow_run_step.status,
+            WorkflowRunStep.WorkflowRunStepStatus.WAITING_APPROVAL,
+        )
+
+        self.client.force_authenticate(user=approver)
+        approve_response = self.client.post(
+            f"/api/documents/{doc.pk}/approval-requests/{approval.pk}/approve/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
+        doc.refresh_from_db()
+        workflow_run.refresh_from_db()
+        approval.refresh_from_db()
+        self.assertEqual(list(doc.tags.values_list("id", flat=True)), [tag.id])
+        self.assertEqual(
+            workflow_run.status,
+            WorkflowRun.WorkflowRunStatus.SUCCESS,
+        )
+        self.assertEqual(approval.status, ApprovalRequest.ApprovalStatus.APPROVED)
+
+    def test_reject_approval_request(self) -> None:
+        approver = User.objects.create_superuser(username="approver")
+        doc = Document.objects.create(
+            title="Workflow Doc",
+            content="needs approval",
+            checksum="manual-workflow-reject",
+            mime_type="application/pdf",
+        )
+
+        trigger = WorkflowTrigger.objects.create(
+            type=WorkflowTrigger.WorkflowTriggerType.MANUAL,
+            matching_algorithm=MatchingModel.MATCH_LITERAL,
+            match="needs approval",
+        )
+        approval_action = WorkflowAction.objects.create(
+            type=WorkflowAction.WorkflowActionType.APPROVAL,
+            approval=WorkflowActionApproval.objects.create(
+                user=approver,
+                message="Please approve this document.",
+            ),
+        )
+        workflow = Workflow.objects.create(
+            name="Reject Approval Workflow",
+            order=1,
+        )
+        workflow.triggers.add(trigger)
+        workflow.actions.add(approval_action)
+
+        self.client.post(
+            f"/api/documents/{doc.pk}/run-workflow/",
+            {"workflow_id": workflow.id},
+            format="json",
+        )
+        approval = ApprovalRequest.objects.get(document=doc)
+
+        self.client.force_authenticate(user=approver)
+        reject_response = self.client.post(
+            f"/api/documents/{doc.pk}/approval-requests/{approval.pk}/reject/",
+            {"note": "Not acceptable"},
+            format="json",
+        )
+
+        self.assertEqual(reject_response.status_code, status.HTTP_200_OK)
+        approval.refresh_from_db()
+        approval.workflow_run.refresh_from_db()
+        self.assertEqual(approval.status, ApprovalRequest.ApprovalStatus.REJECTED)
+        self.assertEqual(
+            approval.workflow_run.status,
+            WorkflowRun.WorkflowRunStatus.FAILED,
+        )
 
     def test_upload_with_custom_fields_errors(self) -> None:
         """

@@ -197,6 +197,69 @@
           <a ngbNavLink i18n>Details</a>
           <ng-template ngbNavContent>
             <div>
+              @if (approvalRequests.length > 0) {
+                <div class="mb-3 d-flex flex-column gap-2">
+                  @for (approval of approvalRequests; track approval.id) {
+                    <div
+                      class="border rounded p-3"
+                      [class.border-warning]="approval.status === 'pending'"
+                      [class.border-success]="approval.status === 'approved'"
+                      [class.border-danger]="approval.status === 'rejected'"
+                    >
+                      <div class="d-flex flex-wrap align-items-center gap-2">
+                        <strong i18n>Approval</strong>
+                        <span class="badge text-bg-secondary">{{ approval.workflow_name }}</span>
+                        <span
+                          class="badge"
+                          [class.text-bg-warning]="approval.status === 'pending'"
+                          [class.text-bg-success]="approval.status === 'approved'"
+                          [class.text-bg-danger]="approval.status === 'rejected'"
+                          [class.text-bg-secondary]="approval.status !== 'pending' && approval.status !== 'approved' && approval.status !== 'rejected'"
+                        >
+                          {{ approval.status }}
+                        </span>
+                        @if (approval.assigned_user) {
+                          <span class="text-muted">
+                            <ng-container i18n>Assigned to</ng-container> {{ approval.assigned_user.username }}
+                          </span>
+                        }
+                      </div>
+                      @if (approval.message) {
+                        <div class="mt-2 text-muted">{{ approval.message }}</div>
+                      }
+                      @if (approval.decided_by) {
+                        <div class="mt-2 small text-muted">
+                          {{ approval.decided_by.username }} · {{ approval.decided_at | customDate }}
+                        </div>
+                      }
+                      @if (canDecideApproval(approval)) {
+                        <div class="mt-3 btn-group btn-group-sm">
+                          <button
+                            type="button"
+                            class="btn btn-success"
+                            (click)="approveRequest(approval)"
+                            [disabled]="approvalActionId !== null"
+                          >
+                            @if (approvalActionId === approval.id) {
+                              <div class="spinner-border spinner-border-sm me-1" role="status"></div>
+                            }
+                            <span i18n>Approve</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-outline-danger"
+                            (click)="rejectRequest(approval)"
+                            [disabled]="approvalActionId !== null"
+                            i18n
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
               <pngx-input-text #inputTitle i18n-title title="Title" formControlName="title" [horizontal]="true" [suggestion]="suggestions?.title" (keyup)="titleKeyUp($event)" [error]="error?.title"></pngx-input-text>
               @if (!isFieldHidden(DocumentDetailFieldID.ArchiveSerialNumber)) {
                 <pngx-input-number i18n-title title="Archive serial number" [error]="error?.archive_serial_number" [horizontal]="true" formControlName='archive_serial_number'></pngx-input-number>

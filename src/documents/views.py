@@ -149,6 +149,7 @@ from documents.matching import match_correspondents
 from documents.matching import match_document_types
 from documents.matching import match_storage_paths
 from documents.matching import match_tags
+from documents.models import ApprovalRequest
 from documents.models import Correspondent
 from documents.models import CustomField
 from documents.models import CustomFieldInstance
@@ -165,6 +166,7 @@ from documents.models import UiSettings
 from documents.models import Workflow
 from documents.models import WorkflowAction
 from documents.models import WorkflowRun
+from documents.models import WorkflowRunStep
 from documents.models import WorkflowTrigger
 from documents.parsers import ParseError
 from documents.parsers import is_mime_type_supported
@@ -181,6 +183,8 @@ from documents.permissions import set_permissions_for_object
 from documents.plugins.date_parsing import get_date_parser
 from documents.schema import generate_object_with_permissions_schema
 from documents.serialisers import AcknowledgeTasksViewSerializer
+from documents.serialisers import ApprovalRequestDecisionSerializer
+from documents.serialisers import ApprovalRequestSerializer
 from documents.serialisers import BulkDownloadSerializer
 from documents.serialisers import BulkEditObjectsSerializer
 from documents.serialisers import BulkEditSerializer
@@ -219,6 +223,7 @@ from documents.serialisers import WorkflowRunHistorySerializer
 from documents.serialisers import WorkflowSerializer
 from documents.serialisers import WorkflowTriggerSerializer
 from documents.signals import document_updated
+from documents.signals.handlers import continue_workflow_run
 from documents.signals.handlers import run_workflows
 from documents.storage import test_s3_connection
 from documents.tasks import build_share_link_bundle
@@ -1989,6 +1994,167 @@ class DocumentViewSet(
                 many=True,
             ).data,
         )
+
+    @extend_schema(
+        operation_id="documents_approval_requests",
+        responses=ApprovalRequestSerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="approval-requests")
+    def approval_requests(self, request, pk=None):
+        document = self.get_object()
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "view_document",
+            document,
+        ):
+            return HttpResponseForbidden("Insufficient permissions")
+
+        approvals = (
+            ApprovalRequest.objects.filter(document=document)
+            .select_related(
+                "assigned_user",
+                "requested_by",
+                "decided_by",
+                "workflow_run__workflow",
+            )
+            .order_by("-created_at", "-pk")
+        )
+        return Response(ApprovalRequestSerializer(approvals, many=True).data)
+
+    @extend_schema(
+        operation_id="documents_approve_request",
+        request=ApprovalRequestDecisionSerializer,
+        responses=ApprovalRequestSerializer,
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"approval-requests/(?P<approval_id>\d+)/approve",
+    )
+    def approve_request(self, request, pk=None, approval_id=None):
+        document = self.get_object()
+        approval = get_object_or_404(
+            ApprovalRequest.objects.select_related(
+                "assigned_user",
+                "workflow_run",
+                "workflow_run_step",
+            ),
+            pk=approval_id,
+            document=document,
+            status=ApprovalRequest.ApprovalStatus.PENDING,
+        )
+        if request.user != approval.assigned_user and not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        serializer = ApprovalRequestDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        note = serializer.validated_data.get("note") or ""
+
+        approval.status = ApprovalRequest.ApprovalStatus.APPROVED
+        approval.decided_by = request.user
+        approval.decided_at = timezone.now()
+        if note:
+            approval.message = (
+                f"{approval.message}\n\nApproval note: {note}".strip()
+                if approval.message
+                else f"Approval note: {note}"
+            )
+        approval.save(
+            update_fields=["status", "decided_by", "decided_at", "message"],
+        )
+
+        approval.workflow_run_step.status = (
+            WorkflowRunStep.WorkflowRunStepStatus.SUCCESS
+        )
+        approval.workflow_run_step.finished_at = timezone.now()
+        approval.workflow_run_step.message = (
+            f"Approved by {request.user.username}"
+            if not note
+            else f"Approved by {request.user.username}: {note}"
+        )
+        approval.workflow_run_step.error = ""
+        approval.workflow_run_step.save(
+            update_fields=["status", "finished_at", "message", "error"],
+        )
+
+        continue_workflow_run(
+            approval.workflow_run,
+            decided_by=request.user,
+        )
+        approval.refresh_from_db()
+        return Response(ApprovalRequestSerializer(approval).data)
+
+    @extend_schema(
+        operation_id="documents_reject_request",
+        request=ApprovalRequestDecisionSerializer,
+        responses=ApprovalRequestSerializer,
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"approval-requests/(?P<approval_id>\d+)/reject",
+    )
+    def reject_request(self, request, pk=None, approval_id=None):
+        document = self.get_object()
+        approval = get_object_or_404(
+            ApprovalRequest.objects.select_related(
+                "assigned_user",
+                "workflow_run",
+                "workflow_run_step",
+            ),
+            pk=approval_id,
+            document=document,
+            status=ApprovalRequest.ApprovalStatus.PENDING,
+        )
+        if request.user != approval.assigned_user and not request.user.is_superuser:
+            return HttpResponseForbidden("Insufficient permissions")
+
+        serializer = ApprovalRequestDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        note = serializer.validated_data.get("note") or ""
+
+        approval.status = ApprovalRequest.ApprovalStatus.REJECTED
+        approval.decided_by = request.user
+        approval.decided_at = timezone.now()
+        if note:
+            approval.message = (
+                f"{approval.message}\n\nRejection note: {note}".strip()
+                if approval.message
+                else f"Rejection note: {note}"
+            )
+        approval.save(
+            update_fields=["status", "decided_by", "decided_at", "message"],
+        )
+
+        approval.workflow_run_step.status = WorkflowRunStep.WorkflowRunStepStatus.FAILED
+        approval.workflow_run_step.finished_at = timezone.now()
+        approval.workflow_run_step.message = (
+            f"Rejected by {request.user.username}"
+            if not note
+            else f"Rejected by {request.user.username}: {note}"
+        )
+        approval.workflow_run_step.error = "Approval rejected"
+        approval.workflow_run_step.save(
+            update_fields=["status", "finished_at", "message", "error"],
+        )
+
+        approval.workflow_run.status = WorkflowRun.WorkflowRunStatus.FAILED
+        approval.workflow_run.finished_at = timezone.now()
+        approval.workflow_run.current_step_order = approval.workflow_run_step.order
+        approval.workflow_run.message = approval.workflow_run_step.message
+        approval.workflow_run.error = approval.workflow_run_step.error
+        approval.workflow_run.save(
+            update_fields=[
+                "status",
+                "finished_at",
+                "current_step_order",
+                "message",
+                "error",
+            ],
+        )
+
+        approval.refresh_from_db()
+        return Response(ApprovalRequestSerializer(approval).data)
 
     @extend_schema(
         operation_id="documents_delete_version",

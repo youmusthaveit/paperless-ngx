@@ -27,6 +27,7 @@ import {
 } from 'src/app/data/matching-model'
 import { StoragePath } from 'src/app/data/storage-path'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
+import { User } from 'src/app/data/user'
 import { Workflow } from 'src/app/data/workflow'
 import {
   WorkflowAction,
@@ -150,6 +151,10 @@ export const WORKFLOW_ACTION_OPTIONS = [
   {
     id: WorkflowActionType.MoveToTrash,
     name: $localize`Move to trash`,
+  },
+  {
+    id: WorkflowActionType.Approval,
+    name: $localize`Request approval`,
   },
 ]
 
@@ -487,6 +492,7 @@ export class WorkflowEditDialogComponent
   mailRules: MailRule[]
   customFields: CustomField[]
   dateCustomFields: CustomField[]
+  users: User[]
 
   expandedItem: number = null
 
@@ -527,6 +533,11 @@ export class WorkflowEditDialogComponent
       .listAll()
       .pipe(first())
       .subscribe((result) => (this.mailRules = result.results))
+
+    this.userService
+      .listAll()
+      .pipe(first())
+      .subscribe((result) => (this.users = result.results))
 
     this.customFieldsService
       .listAll()
@@ -1214,6 +1225,11 @@ export class WorkflowEditDialogComponent
           headers: new FormControl(action.webhook?.headers),
           include_document: new FormControl(!!action.webhook?.include_document),
         }),
+        approval: new FormGroup({
+          id: new FormControl(action.approval?.id),
+          user: new FormControl(action.approval?.user),
+          message: new FormControl(action.approval?.message),
+        }),
         passwords: new FormControl(
           this.formatPasswords(action.passwords ?? [])
         ),
@@ -1357,6 +1373,11 @@ export class WorkflowEditDialogComponent
         headers: null,
         include_document: false,
       },
+      approval: {
+        id: null,
+        user: null,
+        message: null,
+      },
       passwords: [],
     }
     this.object.actions.push(action)
@@ -1393,6 +1414,9 @@ export class WorkflowEditDialogComponent
         }
         if (action.type !== WorkflowActionType.Email) {
           action.email = null
+        }
+        if (action.type !== WorkflowActionType.Approval) {
+          action.approval = null
         }
         action.passwords = this.parsePasswords(action.passwords as any)
       })

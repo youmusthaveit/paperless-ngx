@@ -8,15 +8,19 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
+from guardian.shortcuts import assign_perm
 
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.mail import EmailAttachment
 from documents.mail import send_email
+from documents.models import ApprovalRequest
 from documents.models import Correspondent
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import WorkflowAction
+from documents.models import WorkflowRun
+from documents.models import WorkflowRunStep
 from documents.models import WorkflowTrigger
 from documents.plugins.base import StopConsumeTaskError
 from documents.signals import document_consumption_finished
@@ -154,10 +158,14 @@ def execute_email_action(
         attachments: list[EmailAttachment] = []
         if action.email.include_document:
             attachment: EmailAttachment | None = None
-            if trigger_type in [
-                WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED,
-                WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
-            ] and isinstance(document, Document):
+            if (isinstance(document, Document) and original_file is None) or (
+                trigger_type
+                in [
+                    WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED,
+                    WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
+                ]
+                and isinstance(document, Document)
+            ):
                 friendly_name = (
                     Path(context["current_filename"]).name
                     if context["current_filename"]
@@ -272,16 +280,27 @@ def execute_webhook_action(
                 )
         files = None
         if action.webhook.include_document:
-            with original_file.open("rb") as f:
+            if isinstance(document, Document) and original_file is None:
                 files = {
                     "file": (
                         str(context["filename"])
                         if context["filename"]
-                        else original_file.name,
-                        f.read(),
+                        else Path(document.source_name).name,
+                        document.source_read_bytes(),
                         document.mime_type,
                     ),
                 }
+            else:
+                with original_file.open("rb") as f:
+                    files = {
+                        "file": (
+                            str(context["filename"])
+                            if context["filename"]
+                            else original_file.name,
+                            f.read(),
+                            document.mime_type,
+                        ),
+                    }
         delay_kwargs = {
             "url": action.webhook.url,
             "data": data,
@@ -317,6 +336,47 @@ def execute_webhook_action(
             status="failed",
             error=error,
         )
+
+
+def execute_approval_action(
+    action: WorkflowAction,
+    document: Document | ConsumableDocument,
+    workflow_run: WorkflowRun,
+    workflow_run_step: WorkflowRunStep,
+    requested_by: User | None,
+    logging_group,
+) -> WorkflowActionExecutionResult:
+    if not isinstance(document, Document):
+        error = "Approval actions are only supported for existing documents"
+        logger.error(error, extra={"group": logging_group})
+        return WorkflowActionExecutionResult(status="failed", error=error)
+
+    approval_request = ApprovalRequest.objects.create(
+        document=document,
+        workflow_run=workflow_run,
+        workflow_run_step=workflow_run_step,
+        assigned_user=action.approval.user,
+        requested_by=requested_by,
+        message=action.approval.message or "",
+    )
+    assign_perm("view_document", action.approval.user, document)
+    logger.info(
+        "Approval request %s created for document %s and user %s",
+        approval_request.pk,
+        document.pk,
+        action.approval.user.username,
+        extra={"group": logging_group},
+    )
+    return WorkflowActionExecutionResult(
+        status="waiting_approval",
+        message=f"Waiting for approval from {action.approval.user.username}",
+        request_payload={
+            "approval_request_id": approval_request.pk,
+            "assigned_user_id": action.approval.user_id,
+            "assigned_username": action.approval.user.username,
+            "message": action.approval.message or "",
+        },
+    )
 
 
 def execute_password_removal_action(

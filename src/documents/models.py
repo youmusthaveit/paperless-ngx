@@ -1722,6 +1722,26 @@ class WorkflowActionWebhook(models.Model):
         return f"Workflow Webhook Action {self.pk}"
 
 
+class WorkflowActionApproval(models.Model):
+    user = models.ForeignKey(
+        User,
+        null=False,
+        on_delete=models.CASCADE,
+        related_name="workflow_approval_actions",
+        verbose_name=_("approval user"),
+    )
+
+    message = models.TextField(
+        _("approval message"),
+        null=True,
+        blank=True,
+        help_text=_("Optional message shown to the approver."),
+    )
+
+    def __str__(self):
+        return f"Workflow Approval Action {self.pk}"
+
+
 class WorkflowAction(models.Model):
     class WorkflowActionType(models.IntegerChoices):
         ASSIGNMENT = (
@@ -1747,6 +1767,10 @@ class WorkflowAction(models.Model):
         MOVE_TO_TRASH = (
             6,
             _("Move to trash"),
+        )
+        APPROVAL = (
+            7,
+            _("Approval"),
         )
 
     type = models.PositiveSmallIntegerField(
@@ -1977,6 +2001,15 @@ class WorkflowAction(models.Model):
         verbose_name=_("webhook"),
     )
 
+    approval = models.ForeignKey(
+        WorkflowActionApproval,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="action",
+        verbose_name=_("approval"),
+    )
+
     passwords = models.JSONField(
         _("passwords"),
         null=True,
@@ -2023,6 +2056,7 @@ class WorkflowRun(SoftDeleteModel):
     class WorkflowRunStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
         RUNNING = "running", _("Running")
+        WAITING_APPROVAL = "waiting_approval", _("Waiting for approval")
         SUCCESS = "success", _("Success")
         FAILED = "failed", _("Failed")
 
@@ -2116,6 +2150,7 @@ class WorkflowRunStep(models.Model):
     class WorkflowRunStepStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
         RUNNING = "running", _("Running")
+        WAITING_APPROVAL = "waiting_approval", _("Waiting for approval")
         SUCCESS = "success", _("Success")
         FAILED = "failed", _("Failed")
         SKIPPED = "skipped", _("Skipped")
@@ -2187,3 +2222,94 @@ class WorkflowRunStep(models.Model):
 
     def __str__(self) -> str:
         return f"WorkflowRunStep {self.pk} of {self.workflow_run}"
+
+
+class ApprovalRequest(models.Model):
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        APPROVED = "approved", _("Approved")
+        REJECTED = "rejected", _("Rejected")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+        verbose_name=_("document"),
+    )
+
+    workflow_run = models.ForeignKey(
+        WorkflowRun,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+        verbose_name=_("workflow run"),
+    )
+
+    workflow_run_step = models.OneToOneField(
+        WorkflowRunStep,
+        on_delete=models.CASCADE,
+        related_name="approval_request",
+        verbose_name=_("workflow run step"),
+    )
+
+    assigned_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="assigned_approval_requests",
+        verbose_name=_("assigned user"),
+    )
+
+    requested_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requested_approval_requests",
+        verbose_name=_("requested by"),
+    )
+
+    decided_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="decided_approval_requests",
+        verbose_name=_("decided by"),
+    )
+
+    status = models.CharField(
+        _("status"),
+        max_length=16,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING,
+    )
+
+    message = models.TextField(
+        _("message"),
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(
+        _("created"),
+        default=timezone.now,
+        db_index=True,
+    )
+
+    decided_at = models.DateTimeField(
+        _("decided"),
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = _("approval request")
+        verbose_name_plural = _("approval requests")
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"ApprovalRequest {self.pk} for {self.document}"
+
+
+if settings.AUDIT_LOG_ENABLED:
+    auditlog.register(ApprovalRequest)

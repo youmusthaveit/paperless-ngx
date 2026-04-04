@@ -50,3 +50,25 @@ export interface WorkflowRunHistory extends ObjectWithId {
   }
   steps: WorkflowRunStep[]
 }
+
+export interface ApprovalRequest extends ObjectWithId {
+  status: string
+  message?: string
+  created_at: string
+  decided_at?: string
+  assigned_user?: {
+    id: number
+    username: string
+  }
+  requested_by?: {
+    id: number
+    username: string
+  }
+  decided_by?: {
+    id: number
+    username: string
+  }
+  workflow_name?: string
+  workflow_run: number
+  workflow_run_step: number
+}

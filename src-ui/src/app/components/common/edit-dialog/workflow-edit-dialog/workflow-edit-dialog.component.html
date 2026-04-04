@@ -455,6 +455,29 @@
           </div>
         </div>
       }
+      @case (WorkflowActionType.Approval) {
+        <div class="row" [formGroup]="formGroup.get('approval')">
+          <input type="hidden" formControlName="id" />
+          <div class="col">
+            <pngx-input-select
+              [items]="users"
+              bindLabel="username"
+              bindValue="id"
+              i18n-title
+              title="Approver"
+              formControlName="user"
+              [allowNull]="false"
+              [error]="error?.actions?.[i]?.approval?.user"
+            ></pngx-input-select>
+            <pngx-input-textarea
+              i18n-title
+              title="Approval message"
+              formControlName="message"
+              [error]="error?.actions?.[i]?.approval?.message"
+            ></pngx-input-textarea>
+          </div>
+        </div>
+      }
     }
   </div>
 </ng-template>

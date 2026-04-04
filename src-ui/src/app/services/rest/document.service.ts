@@ -15,6 +15,7 @@ import { FilterRule } from 'src/app/data/filter-rule'
 import { Results } from 'src/app/data/results'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import {
+  ApprovalRequest,
   ManualWorkflowSummary,
   WorkflowRunHistory,
 } from 'src/app/data/workflow'
@@ -75,6 +76,10 @@ export interface EditPdfDocumentsRequest {
   update_document?: boolean
   include_metadata?: boolean
   source_mode?: BulkEditSourceMode
+}
+
+export interface ApprovalDecisionRequest {
+  note?: string
 }
 
 export interface RemovePasswordDocumentsRequest {
@@ -491,6 +496,34 @@ export class DocumentService extends AbstractPaperlessService<Document> {
   getWorkflowRuns(id: number): Observable<WorkflowRunHistory[]> {
     return this.http.get<WorkflowRunHistory[]>(
       this.getResourceUrl(id, 'workflow-runs')
+    )
+  }
+
+  getApprovalRequests(id: number): Observable<ApprovalRequest[]> {
+    return this.http.get<ApprovalRequest[]>(
+      this.getResourceUrl(id, 'approval-requests')
+    )
+  }
+
+  approveRequest(
+    id: number,
+    approvalId: number,
+    body: ApprovalDecisionRequest = {}
+  ): Observable<ApprovalRequest> {
+    return this.http.post<ApprovalRequest>(
+      this.getResourceUrl(id, `approval-requests/${approvalId}/approve`),
+      body
+    )
+  }
+
+  rejectRequest(
+    id: number,
+    approvalId: number,
+    body: ApprovalDecisionRequest = {}
+  ): Observable<ApprovalRequest> {
+    return this.http.post<ApprovalRequest>(
+      this.getResourceUrl(id, `approval-requests/${approvalId}/reject`),
+      body
     )
   }
 
