@@ -285,6 +285,12 @@ class RemotePaperlessClient:
             raise RemoteImportError("Remote document detail is invalid.")
         return payload
 
+    def get_entity_detail(self, path: str, object_id: int) -> dict[str, Any]:
+        payload = self.get_json(f"{path}/{object_id}/")
+        if not isinstance(payload, dict):
+            raise RemoteImportError(f"Remote {path} detail is invalid.")
+        return payload
+
     def download_document_original(self, document_id: int) -> tuple[str, bytes]:
         response = self._request(
             "GET",
@@ -327,6 +333,115 @@ class RemoteImportService:
     def _build_remote_document_url(self, document_id: int) -> str:
         remote_ui_base_url = self.base_url.removesuffix("/api/")
         return f"{remote_ui_base_url}/documents/{document_id}"
+
+    def _collect_reference_ids(
+        self,
+        payload: dict[str, Any],
+        *,
+        field_name: str,
+        nested_field_name: str | None = None,
+    ) -> set[int]:
+        ids: set[int] = set()
+        results = payload.get("results", [])
+        if not isinstance(results, list):
+            return ids
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+
+            if nested_field_name is None:
+                raw_values = (
+                    result.get(field_name)
+                    if isinstance(result.get(field_name), list)
+                    else []
+                )
+                for raw_value in raw_values:
+                    resolved_id = coerce_remote_id(raw_value)
+                    if resolved_id is not None:
+                        ids.add(resolved_id)
+                continue
+
+            raw_value = result.get(field_name)
+            if (
+                isinstance(raw_value, dict)
+                and nested_field_name is not None
+                and isinstance(raw_value.get(nested_field_name), str)
+            ):
+                continue
+
+            resolved_id = coerce_remote_id(raw_value)
+            if resolved_id is not None:
+                ids.add(resolved_id)
+
+        return ids
+
+    def _fetch_entity_map(
+        self,
+        *,
+        client: RemotePaperlessClient,
+        path: str,
+        ids: set[int],
+    ) -> dict[int, dict[str, Any]]:
+        entities: dict[int, dict[str, Any]] = {}
+        for object_id in sorted(ids):
+            try:
+                entity = client.get_entity_detail(path, object_id)
+            except RemoteImportError as exc:
+                logger.warning(
+                    "Remote import could not load %s %s: %s",
+                    path,
+                    object_id,
+                    exc,
+                )
+                continue
+
+            entity_id = coerce_remote_id(entity.get("id"))
+            if entity_id is None:
+                continue
+            entities[entity_id] = entity
+
+        return entities
+
+    def _extract_named_reference(
+        self,
+        raw_value: Any,
+        entities: dict[int, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        resolved_id = coerce_remote_id(raw_value)
+        entity = entities.get(resolved_id) if resolved_id is not None else None
+
+        if isinstance(entity, dict):
+            return {
+                "id": entity.get("id"),
+                "name": entity.get("name"),
+            }
+
+        if isinstance(raw_value, dict):
+            name = raw_value.get("name")
+            if isinstance(name, str):
+                return {
+                    "id": raw_value.get("id"),
+                    "name": name,
+                }
+
+        return None
+
+    def _extract_named_tags(
+        self,
+        raw_tags: Any,
+        entities: dict[int, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw_tags, list):
+            return []
+
+        tags = []
+        for raw_tag in raw_tags:
+            extracted = self._extract_named_reference(raw_tag, entities)
+            if extracted is not None:
+                tags.append(extracted)
+
+        return tags
 
     def _build_local_index(self, model) -> tuple[dict[str, Any], dict[str, Any]]:
         objects = list(model.objects.all())
@@ -590,35 +705,59 @@ class RemoteImportService:
         page_size: int,
     ) -> dict[str, Any]:
         with self._client() as client:
-            correspondents = {
-                int(item["id"]): item
-                for item in client.get_all_results("correspondents/")
-                if isinstance(item, dict) and item.get("id") is not None
-            }
-            tags = {
-                int(item["id"]): item
-                for item in client.get_all_results("tags/")
-                if isinstance(item, dict) and item.get("id") is not None
-            }
-            document_types = {
-                int(item["id"]): item
-                for item in client.get_all_results("document_types/")
-                if isinstance(item, dict) and item.get("id") is not None
-            }
-            storage_paths = {
-                int(item["id"]): item
-                for item in client.get_all_results("storage_paths/")
-                if isinstance(item, dict) and item.get("id") is not None
-            }
-            custom_fields = {
-                int(item["id"]): item
-                for item in client.get_all_results("custom_fields/")
-                if isinstance(item, dict) and item.get("id") is not None
-            }
             payload = client.get_documents_page(
                 query=query,
                 page=page,
                 page_size=page_size,
+            )
+            correspondents = self._fetch_entity_map(
+                client=client,
+                path="correspondents",
+                ids=self._collect_reference_ids(
+                    payload,
+                    field_name="correspondent",
+                    nested_field_name="name",
+                ),
+            )
+            tags = self._fetch_entity_map(
+                client=client,
+                path="tags",
+                ids=self._collect_reference_ids(payload, field_name="tags"),
+            )
+            document_types = self._fetch_entity_map(
+                client=client,
+                path="document_types",
+                ids=self._collect_reference_ids(
+                    payload,
+                    field_name="document_type",
+                    nested_field_name="name",
+                ),
+            )
+            storage_paths = self._fetch_entity_map(
+                client=client,
+                path="storage_paths",
+                ids=self._collect_reference_ids(
+                    payload,
+                    field_name="storage_path",
+                    nested_field_name="name",
+                ),
+            )
+            custom_fields = self._fetch_entity_map(
+                client=client,
+                path="custom_fields",
+                ids={
+                    field_id
+                    for result in payload.get("results", [])
+                    if isinstance(result, dict)
+                    for field_instance in (
+                        result.get("custom_fields", [])
+                        if isinstance(result.get("custom_fields"), list)
+                        else []
+                    )
+                    if isinstance(field_instance, dict)
+                    for field_id in [coerce_remote_id(field_instance.get("field"))]
+                    if field_id is not None
+                },
             )
 
         results = []
@@ -626,24 +765,17 @@ class RemoteImportService:
             if not isinstance(result, dict):
                 continue
 
-            correspondent_id = coerce_remote_id(result.get("correspondent"))
-            document_type_id = coerce_remote_id(result.get("document_type"))
-            storage_path_id = coerce_remote_id(result.get("storage_path"))
-
-            correspondent = (
-                correspondents.get(correspondent_id)
-                if correspondent_id is not None
-                else None
+            correspondent = self._extract_named_reference(
+                result.get("correspondent"),
+                correspondents,
             )
-            document_type = (
-                document_types.get(document_type_id)
-                if document_type_id is not None
-                else None
+            document_type = self._extract_named_reference(
+                result.get("document_type"),
+                document_types,
             )
-            storage_path = (
-                storage_paths.get(storage_path_id)
-                if storage_path_id is not None
-                else None
+            storage_path = self._extract_named_reference(
+                result.get("storage_path"),
+                storage_paths,
             )
 
             mapped_custom_fields = []
@@ -679,43 +811,10 @@ class RemoteImportService:
                     "created": result.get("created"),
                     "original_file_name": result.get("original_file_name"),
                     "archive_serial_number": result.get("archive_serial_number"),
-                    "correspondent": (
-                        {
-                            "id": correspondent.get("id"),
-                            "name": correspondent.get("name"),
-                        }
-                        if isinstance(correspondent, dict)
-                        else None
-                    ),
-                    "document_type": (
-                        {
-                            "id": document_type.get("id"),
-                            "name": document_type.get("name"),
-                        }
-                        if isinstance(document_type, dict)
-                        else None
-                    ),
-                    "storage_path": (
-                        {
-                            "id": storage_path.get("id"),
-                            "name": storage_path.get("name"),
-                        }
-                        if isinstance(storage_path, dict)
-                        else None
-                    ),
-                    "tags": [
-                        {
-                            "id": tags[resolved_tag_id]["id"],
-                            "name": tags[resolved_tag_id]["name"],
-                        }
-                        for tag_id in (
-                            result.get("tags", [])
-                            if isinstance(result.get("tags"), list)
-                            else []
-                        )
-                        for resolved_tag_id in [coerce_remote_id(tag_id)]
-                        if resolved_tag_id is not None and resolved_tag_id in tags
-                    ],
+                    "correspondent": correspondent,
+                    "document_type": document_type,
+                    "storage_path": storage_path,
+                    "tags": self._extract_named_tags(result.get("tags"), tags),
                     "custom_fields": mapped_custom_fields,
                 },
             )
